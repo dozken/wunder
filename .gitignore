@@ -1,0 +1,32 @@
+# Python
+env/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Datasets (too large for git)
+competition_package/datasets/
+*.parquet
+
+# Model artifacts (large binary files)
+*.onnx
+*.pt
+*.h5
+*.pkl
+
+# Submissions
+submission.zip
+*.zip
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Antigravity
+.antigravity/
+.agent/
