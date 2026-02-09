@@ -1,0 +1,33 @@
+[tasks.docker-build]
+description = "Build the scorer Docker image"
+run = "docker build -t wunder-scorer -f docker/Dockerfile ."
+
+[tasks.docker-test]
+description = "Test solution in competition environment (1 CPU, 16GB RAM, no network)"
+depends = ["docker-build"]
+run = """
+docker run --rm \
+  --cpus="1" \
+  --memory="16g" \
+  --network=none \
+  -v "$(pwd)/src/solution.py:/app/solution.py:ro" \
+  -v "$(pwd)/docker/run_scorer.py:/app/run_scorer.py:ro" \
+  wunder-scorer
+"""
+
+[tasks.test]
+description = "Run contract tests"
+run = "cd src && python -m pytest test_contract.py -v"
+
+[tasks.score]
+description = "Run local validation scoring"
+run = "cd src && python score.py"
+
+[tasks.submit]
+description = "Package solution.py + artifacts into submission.zip"
+run = """
+cd src && \
+zip -r ../submission.zip solution.py \
+  -x "test_*" "score.py" "__pycache__/*" "*.pyc" && \
+echo "✅ Created submission.zip"
+"""
