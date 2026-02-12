@@ -27,7 +27,7 @@ run = "cd src && python score.py"
 description = "Package solution.py + artifacts into submission.zip"
 run = """
 cd src && \
-zip -r ../submission.zip solution.py \
+zip -r ../submission.zip solution.py *.onnx \
   -x "test_*" "score.py" "__pycache__/*" "*.pyc" && \
 echo "✅ Created submission.zip"
 """
