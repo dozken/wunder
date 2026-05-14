@@ -12,6 +12,7 @@ competition_package/datasets/
 # Model artifacts (large binary files)
 *.onnx
 *.pt
+*.pth
 *.h5
 *.pkl
 

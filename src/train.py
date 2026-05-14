@@ -10,8 +10,8 @@ Key changes from V4:
   - Sequence-level mixup augmentation
 
 Usage:
-    cd /Users/dozken/projects/wunder && env/bin/python3 src/train.py
-    cd /Users/dozken/projects/wunder && env/bin/python3 src/train.py --fold 0
+    python src/train.py
+    python src/train.py --fold 0
 """
 import os
 import sys
