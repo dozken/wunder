@@ -6,7 +6,7 @@ __pycache__/
 .pytest_cache/
 
 # Datasets (too large for git)
-competition_package/datasets/
+**/competition_package/datasets/
 *.parquet
 
 # Model artifacts (large binary files)
