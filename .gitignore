@@ -7,7 +7,12 @@ __pycache__/
 
 # Datasets (too large for git)
 **/competition_package/datasets/
+**/datasets/
 *.parquet
+
+# Starter packs
+wnn_*starterpack*
+*.tar.gz
 
 # Model artifacts (large binary files)
 *.onnx

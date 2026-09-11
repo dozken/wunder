@@ -1,0 +1,21 @@
+[tasks.fetch-data]
+description = "Stream and extract the 33.7 GB starter pack into this directory"
+run = """
+curl -L https://files.wundernn.io/wnn_connectome_starterpack.tar.gz | tar -xz
+"""
+
+[tasks.docker-build]
+description = "Build the scorer Docker image"
+run = "docker build -t wnn-connectome-scorer -f docker/Dockerfile ."
+
+[tasks.docker-test]
+description = "Test solution in competition environment (1 CPU, 16GB RAM, no network)"
+depends = ["docker-build"]
+run = """
+docker run --rm \
+  --cpus="1" \
+  --memory="16g" \
+  --network=none \
+  -v "$(pwd)/src/solution.py:/app/solution.py:ro" \
+  wnn-connectome-scorer
+"""
