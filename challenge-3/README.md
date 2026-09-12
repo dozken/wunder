@@ -49,16 +49,33 @@ The submission contract is nearly identical, but the modelling problem is not:
 challenge-3/
 ├── README.md
 ├── mise.toml
-├── datasets/       # starter pack data (gitignored)
-├── docker/         # local replica of the scoring container
-├── src/            # model, training, inference
-└── wunder_docs/    # mirrored challenge docs
+├── docker/                      # local replica of the scoring container
+├── src/                         # model, training, inference
+├── wunder_docs/                 # challenge docs (copied from the starter pack)
+└── wnn_connectome_starterpack/  # gitignored, 33.7 GB
+    ├── datasets/{train,valid,valid_mask}.parquet
+    ├── baseline/                # provided GRU baseline + ready-made submission zip
+    ├── utils.py                 # DataPoint, weighted_pearson, ScorerStepByStep
+    └── METRIC.md
 ```
 
 ## Get the data
 
 ```bash
-mise run fetch-data     # streams the 33.7 GB starter pack into ./
+mise run fetch-data       # streams the 33.7 GB starter pack into ./
+mise run score-baseline   # reproduce the provided 0.589595 WP baseline
 ```
 
 Needs ~35 GB free disk.
+
+## Notes from the starter pack
+
+*   `utils.py` enforces the contract strictly: rows must arrive in order, a new
+    sequence must start at step 0, and `predict` must return `None` on warm-up rows
+    **after** updating state.
+*   A sequence is excluded from scoring unless each target has at least one strictly
+    positive and one strictly negative value among its scored rows.
+*   WP weights are `abs(clipped target)`, so large-magnitude moves dominate the score.
+    Constant predictions score 0 for that sequence but do not exclude it.
+*   The site says the container is Python 3.11; the starter pack README says 3.10.
+    Pinned deps are `numpy==2.2.6`, `onnxruntime==1.23.2`, `pyarrow==19.0.1`.
