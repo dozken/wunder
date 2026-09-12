@@ -105,6 +105,14 @@ ONNX Runtime has a dynamic-int8 kernel for LSTM but not for GRU, so a
 quantised LSTM buys roughly twice the capacity per microsecond. Ensembles
 multiply cost linearly. Per-call fixed overhead is ~20 µs.
 
+**Calibration from submission `25KKGXOR` (GRU 192×2 proj64, 35 µs/row idle on
+the Mac): the platform took 45m40s for the test set, i.e. ~73 µs/row — the
+scorer's vCPU is ~2× slower than an M-series core.** With a 60 min budget the
+ceiling is ~45 µs/row measured idle on the Mac; GRU 256×2 (57 µs) would time
+out. Capacity gains have to come from cheaper graphs (the ~20 µs fixed
+overhead is more than the GRU-192 compute itself), int8 LSTM if x86 VNNI makes
+it fast there, or better training at equal size.
+
 ## Workflow
 
 ```bash
@@ -159,6 +167,7 @@ mise run submit                                   # -> submission.zip
 | 09-12 | GRU 256×2 proj128, **predicted soft mask** | 0.583 | mask model: held-out AUC 0.93, AP 0.66 |
 | 09-12 | GRU 192×2 proj64, **predicted soft mask** | 0.575 | +0.03 over the same model on all rows |
 | 09-12 | **full data**, GRU 192×2 proj64, soft mask, epoch 1 of 2 | **0.5955** (EMA, 192 held-out seqs) | packaged as `submissions/2026-09-12_gru192_e1`; epoch 2 lost to a session restart |
+| 09-12 | ↳ submitted as `25KKGXOR` | **public 0.5617** (#76) | below the baseline's public 0.5719 despite beating it locally; 45m40s runtime |
 
 The scored rows are a distinct regime: the reference model scores 0.58 on
 them and 0.30 on all required rows (or any random 11%). `is_scored` is
