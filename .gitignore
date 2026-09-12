@@ -36,3 +36,9 @@ Thumbs.db
 # Antigravity
 .antigravity/
 .agent/
+
+# Download scratch
+.dl/
+
+# Training runs (checkpoints, logs)
+runs/

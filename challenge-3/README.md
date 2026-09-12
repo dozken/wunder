@@ -79,3 +79,42 @@ Needs ~35 GB free disk.
     Constant predictions score 0 for that sequence but do not exclude it.
 *   The site says the container is Python 3.11; the starter pack README says 3.10.
     Pinned deps are `numpy==2.2.6`, `onnxruntime==1.23.2`, `pyarrow==19.0.1`.
+
+## Inference cost model
+
+`predict` is called 37.46M times per test set with a 60 minute budget on one
+vCPU: **96 µs per call**. The cost is dominated by reading the recurrent
+weights once per row, so it scales with parameter bytes rather than FLOPs.
+Measured on an M-series core via `src/bench.py` (the scorer's x86 vCPU is
+expected to be slower; calibrate with a real submission before trusting a
+margin below ~2x):
+
+| model | params | µs/row fp32 | µs/row int8 |
+|---|---:|---:|---:|
+| provided baseline GRU 128×2 | 190k | 25 | – |
+| GRU 128×2 + proj 64 | 206k | 23 | 23 |
+| GRU 192×2 + proj 64 | 429k | 36 | 35 |
+| GRU 256×1 + proj 64 | 338k | 30 | 26 |
+| GRU 256×2 + proj 64 | 733k | 54 | 52 |
+| GRU 384×2 + proj 64 | 1.59M | 100 | 90 |
+| LSTM 128×2 + proj 64 | 264k | 29 | 24 |
+| LSTM 256×1 + proj 64 | 420k | 35 | 22 |
+| LSTM 256×2 + proj 64 | 947k | 69 | 37 |
+
+ONNX Runtime has a dynamic-int8 kernel for LSTM but not for GRU, so a
+quantised LSTM buys roughly twice the capacity per microsecond. Ensembles
+multiply cost linearly. Per-call fixed overhead is ~20 µs.
+
+## Workflow
+
+```bash
+mise run bench                                   # latency of src/solution.py
+python src/train.py --tag dev --seqs 512 --epochs 2
+python src/train.py --tag gru192 --hidden 192 --epochs 8
+python src/score.py --checkpoint runs/gru192/best.pt      # full valid, batched
+python src/export.py runs/gru192/best.pt src/model_a.onnx  # + parity check
+python src/score.py --strict --seqs 20                    # organisers' scorer path
+cd src && python -m pytest test_contract.py -v
+mise run docker-test                              # 1 CPU container, SEQS=20
+mise run submit                                   # -> submission.zip
+```
