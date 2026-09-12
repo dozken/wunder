@@ -30,6 +30,7 @@ class ModelConfig:
     dropout: float = 0.1
     input_clip: float = 10.0    # clamp standardised inputs to +-clip
     diff: bool = False          # also feed x_t - x_{t-1}; previous row rides in the state
+    out: int = N_TARGETS        # output channels (1 for the scored-row predictor)
 
     def to_dict(self):
         return asdict(self)
@@ -59,7 +60,7 @@ class Predictor(nn.Module):
         head_in = cfg.hidden + rnn_in
         self.head_norm = nn.LayerNorm(head_in)
         self.head = nn.Sequential(nn.Linear(head_in, cfg.hidden), nn.GELU(),
-                                  nn.Dropout(cfg.dropout), nn.Linear(cfg.hidden, N_TARGETS))
+                                  nn.Dropout(cfg.dropout), nn.Linear(cfg.hidden, cfg.out))
 
     @property
     def rnn_state_layers(self) -> int:

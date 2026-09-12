@@ -41,13 +41,20 @@ class Sequence:
 class SequenceReader:
     """Random access to the sequences of one parquet file."""
 
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str, soft_mask: Path | str | None = None):
         self.path = Path(path)
         self.parquet = pq.ParquetFile(self.path)
         names = self.parquet.schema_arrow.names
         self.has_mask = "is_scored" in names
+        # predicted P(is_scored) per row for files without the real mask, as
+        # written by maskmodel.py: float16 memmap of shape (row_groups, 20000)
+        self.soft_mask = None
+        if soft_mask is not None:
+            self.soft_mask = np.memmap(soft_mask, dtype=np.float16, mode="r",
+                                       shape=(self.parquet.num_row_groups, SEQUENCE_LENGTH))
+            self.has_mask = True
         self.columns = ["seq_ix", *FEATURE_COLUMNS, *TARGET_COLUMNS]
-        if self.has_mask:
+        if "is_scored" in names:
             self.columns.append("is_scored")
 
     def __len__(self) -> int:
@@ -64,7 +71,9 @@ class SequenceReader:
         for j, name in enumerate(TARGET_COLUMNS):
             targets[:, j] = table.column(name).to_numpy(zero_copy_only=False)
         scored = None
-        if self.has_mask:
+        if self.soft_mask is not None:
+            scored = np.asarray(self.soft_mask[index], dtype=np.float32) * STEP_MASK
+        elif "is_scored" in self.columns:
             scored = table.column("is_scored").to_numpy(zero_copy_only=False).astype(bool) & STEP_MASK
         seq_ix = int(table.column("seq_ix")[0].as_py())
         return Sequence(seq_ix, features, targets, scored)

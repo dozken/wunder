@@ -102,8 +102,10 @@ def main() -> int:
                     help="parquet to train on; pass valid.parquet for mask experiments")
     ap.add_argument("--holdout", type=int, default=0,
                     help="when training on valid.parquet: number of its sequences held out for evaluation")
-    ap.add_argument("--loss-mask", default="all", choices=["all", "scored"],
-                    help="rows the loss sees: all required rows, or only is_scored rows (needs a masked file)")
+    ap.add_argument("--loss-mask", default="all", choices=["all", "scored", "soft"],
+                    help="rows the loss sees: all required rows, the is_scored rows, or the predicted "
+                         "P(is_scored) weights from --soft-mask")
+    ap.add_argument("--soft-mask", default=None, help="float16 memmap from maskmodel.py label")
     ap.add_argument("--val-seqs", type=int, default=192, help="validation subset for the per-epoch check")
     ap.add_argument("--stats-seqs", type=int, default=128)
     ap.add_argument("--device", default="auto")
@@ -124,7 +126,7 @@ def main() -> int:
         with open(log_path, "a") as f:
             f.write(json.dumps(kv) + "\n")
 
-    train_reader = SequenceReader(args.train_path)
+    train_reader = SequenceReader(args.train_path, soft_mask=args.soft_mask if args.loss_mask == "soft" else None)
     valid_reader = SequenceReader(VALID_PATH)
     rng = np.random.default_rng(args.seed)
     if args.holdout:
@@ -138,8 +140,8 @@ def main() -> int:
         val_idx = rng.choice(len(valid_reader), size=min(args.val_seqs, len(valid_reader)), replace=False)
     if args.seqs:
         train_idx = rng.choice(train_idx, size=min(args.seqs, len(train_idx)), replace=False)
-    if args.loss_mask == "scored" and not train_reader.has_mask:
-        ap.error("--loss-mask scored needs a training file with is_scored")
+    if args.loss_mask != "all" and not train_reader.has_mask:
+        ap.error(f"--loss-mask {args.loss_mask} needs a masked training file or --soft-mask")
     # a fixed slice of training sequences scored with the exact metric: the
     # train/val gap is the overfitting diagnostic
     fit_idx = train_idx[:min(64, len(train_idx))]
@@ -190,7 +192,7 @@ def main() -> int:
         for b, batch in enumerate(stream):
             x_all = torch.from_numpy(batch.features).to(device, non_blocking=True)
             y_all = torch.from_numpy(batch.targets).to(device, non_blocking=True)
-            m_all = (torch.from_numpy(batch.scored).to(device) if args.loss_mask == "scored"
+            m_all = (torch.from_numpy(batch.scored).to(device) if args.loss_mask != "all"
                      else step_mask.expand(x_all.shape[0], -1))
             state = model.initial_state(x_all.shape[0], device)
             seq_pearson.reset()
