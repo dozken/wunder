@@ -19,8 +19,12 @@ done
 
 echo "== export"
 rm -f src/*.onnx
-python3 src/export.py "$CKPT" "src/$NAME.onnx" $INT8 2>&1 | grep -v -i -E "warning|torch.onnx|_generic_rnn"
-if [ -n "$INT8" ]; then rm -f "src/$NAME.onnx"; fi     # keep only the int8 graph
+if [ -z "$INT8" ] && python3 src/export_slim.py "$CKPT" "src/$NAME.onnx" 2>&1 | grep -v -i warning; then
+  echo "(hand-built slim graph)"
+else
+  python3 src/export.py "$CKPT" "src/$NAME.onnx" $INT8 2>&1 | grep -v -i -E "warning|torch.onnx|_generic_rnn"
+  if [ -n "$INT8" ]; then rm -f "src/$NAME.onnx"; fi     # keep only the int8 graph
+fi
 ls -la src/*.onnx
 
 echo "== contract tests"
