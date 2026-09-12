@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 ONLY=${1:-all}
 run() { [ "$ONLY" = all ] || [ "$ONLY" = "$1" ]; }
 
-MASK="runs/mask/soft_mask.f16"          # from maskmodel.py label (adjust if named differently)
+MASK="runs/mask/train_scored_p.f16"     # written by: python src/maskmodel.py label --tag mask
 COMMON="--loss-mask soft --soft-mask $MASK --lr 5e-4 --batch 64 --chunk 1000 --holdout 192 --ema 0.999"
 
 # r1: the same recipe that gave 0.5955 after one epoch, run to completion.
