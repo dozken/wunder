@@ -15,3 +15,5 @@ Local numbers:
 - export parity torch vs onnxruntime: 6e-7; contract tests 5/5
 
 Provided baseline for reference: 0.5896 on the full validation set.
+
+Submitted 2026-09-12 14:52 as `25KKGXOR` (submission 1/5 that day).
