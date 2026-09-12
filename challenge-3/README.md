@@ -167,8 +167,16 @@ mise run submit                                   # -> submission.zip
 | 09-12 | GRU 256×2 proj128, **predicted soft mask** | 0.583 | mask model: held-out AUC 0.93, AP 0.66 |
 | 09-12 | GRU 192×2 proj64, **predicted soft mask** | 0.575 | +0.03 over the same model on all rows |
 | 09-12 | **full data**, GRU 192×2 proj64, soft mask, epoch 1 of 2 | **0.5955** (EMA, 192 held-out seqs) | packaged as `submissions/2026-09-12_gru192_e1`; epoch 2 lost to a session restart |
-| 09-12 | ↳ submitted as `25KKGXOR` | **public 0.5617** (#76) | below the baseline's public 0.5719 despite beating it locally; 45m40s runtime |
+| 09-12 | ↳ submitted as `25KKGXOR` | **public 0.5617** (#76) | baseline's public score is 0.5719; 45m40s runtime |
+| 09-12 | provided baseline on the same 192 held-out seqs | 0.6062 | so gru192_e1 was −0.011 locally too — the held-out subset is easier than the full valid (0.5896); no generalisation gap |
+| 09-12 | train + valid mix, GRU 192×2, soft mask, epoch 1 of 3 | 0.5747 (EMA) | machine slept mid-epoch; epoch 3 pending |
 
+**Drift finding.** On the held-out set gru192_e1 beats the baseline in every
+quarter of the sequence (0.64/0.64/0.62/0.60 vs 0.61/0.61/0.58/0.58) but
+loses on whole sequences: its prediction level drifts within a sequence.
+Per-chunk Pearson is blind to that; the metric's whole-sequence centring is
+not. `--seq-loss` (running-statistics sequence Pearson) is the candidate fix.
+Always compare against the baseline on the *same* sequences.
 The scored rows are a distinct regime: the reference model scores 0.58 on
 them and 0.30 on all required rows (or any random 11%). `is_scored` is
 partly predictable from the row itself (GBM AUC 0.83; `a3`, `a2`, `a4` carry
