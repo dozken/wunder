@@ -98,6 +98,12 @@ def main() -> int:
                     help="sequence-level Pearson with running statistics instead of per-chunk Pearson")
     ap.add_argument("--ema", type=float, default=0.999)
     ap.add_argument("--seqs", type=int, default=0, help="limit training sequences (0 = all)")
+    ap.add_argument("--train-path", default=str(TRAIN_PATH),
+                    help="parquet to train on; pass valid.parquet for mask experiments")
+    ap.add_argument("--holdout", type=int, default=0,
+                    help="when training on valid.parquet: number of its sequences held out for evaluation")
+    ap.add_argument("--loss-mask", default="all", choices=["all", "scored"],
+                    help="rows the loss sees: all required rows, or only is_scored rows (needs a masked file)")
     ap.add_argument("--val-seqs", type=int, default=192, help="validation subset for the per-epoch check")
     ap.add_argument("--stats-seqs", type=int, default=128)
     ap.add_argument("--device", default="auto")
@@ -118,13 +124,22 @@ def main() -> int:
         with open(log_path, "a") as f:
             f.write(json.dumps(kv) + "\n")
 
-    train_reader = SequenceReader(TRAIN_PATH)
+    train_reader = SequenceReader(args.train_path)
     valid_reader = SequenceReader(VALID_PATH)
     rng = np.random.default_rng(args.seed)
-    train_idx = np.arange(len(train_reader))
+    if args.holdout:
+        # training on the masked validation file: split it into train / held-out
+        perm = rng.permutation(len(train_reader))
+        val_idx, train_idx = perm[:args.holdout], perm[args.holdout:]
+        val_idx = val_idx[:args.val_seqs]
+        valid_reader = train_reader
+    else:
+        train_idx = np.arange(len(train_reader))
+        val_idx = rng.choice(len(valid_reader), size=min(args.val_seqs, len(valid_reader)), replace=False)
     if args.seqs:
-        train_idx = rng.choice(train_idx, size=args.seqs, replace=False)
-    val_idx = rng.choice(len(valid_reader), size=min(args.val_seqs, len(valid_reader)), replace=False)
+        train_idx = rng.choice(train_idx, size=min(args.seqs, len(train_idx)), replace=False)
+    if args.loss_mask == "scored" and not train_reader.has_mask:
+        ap.error("--loss-mask scored needs a training file with is_scored")
     # a fixed slice of training sequences scored with the exact metric: the
     # train/val gap is the overfitting diagnostic
     fit_idx = train_idx[:min(64, len(train_idx))]
@@ -175,12 +190,14 @@ def main() -> int:
         for b, batch in enumerate(stream):
             x_all = torch.from_numpy(batch.features).to(device, non_blocking=True)
             y_all = torch.from_numpy(batch.targets).to(device, non_blocking=True)
+            m_all = (torch.from_numpy(batch.scored).to(device) if args.loss_mask == "scored"
+                     else step_mask.expand(x_all.shape[0], -1))
             state = model.initial_state(x_all.shape[0], device)
             seq_pearson.reset()
             for t in range(0, SEQUENCE_LENGTH, args.chunk):
                 x = x_all[:, t:t + args.chunk]
                 y = y_all[:, t:t + args.chunk]
-                m = step_mask[t:t + args.chunk].expand(x.shape[0], -1)
+                m = m_all[:, t:t + args.chunk]
                 for g in opt.param_groups:
                     g["lr"] = lr_at(step)
                 pred, state = model(x, state)
@@ -210,7 +227,7 @@ def main() -> int:
         fit_raw = evaluate(model, fit.features, fit.targets, fit_scored, device)
         print(f"== epoch {epoch} done in {(time.time() - t_epoch) / 60:.1f} min: "
               f"val WP ema {scores['weighted_pearson']:.4f} (t0 {scores['t0']:.4f} t1 {scores['t1']:.4f}) "
-              f"raw {raw['weighted_pearson']:.4f} | train-subset WP raw {fit_raw['weighted_pearson']:.4f}", flush=True)
+              f"raw {raw['weighted_pearson']:.4f} | train-subset WP (all rows) {fit_raw['weighted_pearson']:.4f}", flush=True)
         log(epoch=epoch, step=step, val_ema=scores, val_raw=raw, fit_raw=fit_raw)
 
         use_ema = scores["weighted_pearson"] >= raw["weighted_pearson"]
