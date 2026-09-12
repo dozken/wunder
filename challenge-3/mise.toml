@@ -16,9 +16,25 @@ run = "python $SP/baseline/solution.py --validation $SP/datasets/valid.parquet"
 description = "Measure per-row inference latency against the 60 min / 1 vCPU budget"
 run = "python src/bench.py"
 
+[tasks.eda]
+description = "Print a first-look summary of a random sample of sequences"
+run = "python src/eda.py"
+
+[tasks.train]
+description = "Train a model: mise run train -- --tag NAME [train.py args]"
+run = "python src/train.py"
+
+[tasks.export]
+description = "Export a checkpoint to ONNX with parity check: mise run export -- runs/NAME/best.pt src/model_a.onnx"
+run = "python src/export.py"
+
 [tasks.score]
-description = "Score src/solution.py on the validation set"
+description = "Score a checkpoint on the full validation set: mise run score -- --checkpoint runs/NAME/best.pt"
 run = "python src/score.py"
+
+[tasks.score-strict]
+description = "Drive src/solution.py through the organisers' row-by-row scorer on 20 sequences"
+run = "python src/score.py --strict --seqs 20"
 
 [tasks.docker-build]
 description = "Build the scorer Docker image"
@@ -32,6 +48,7 @@ docker run --rm \
   --cpus="1" \
   --memory="16g" \
   --network=none \
+  -e SEQS="${SEQS:-20}" \
   -v "$(pwd)/src:/app/src:ro" \
   -v "$(pwd)/$SP/datasets:/app/datasets:ro" \
   wnn-connectome-scorer
