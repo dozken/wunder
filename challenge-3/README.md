@@ -170,13 +170,19 @@ mise run submit                                   # -> submission.zip
 | 09-12 | ↳ submitted as `25KKGXOR` | **public 0.5617** (#76) | baseline's public score is 0.5719; 45m40s runtime |
 | 09-12 | provided baseline on the same 192 held-out seqs | 0.6062 | so gru192_e1 was −0.011 locally too — the held-out subset is easier than the full valid (0.5896); no generalisation gap |
 | 09-12 | train + valid mix, GRU 192×2, soft mask, epoch 1 of 3 | 0.5747 (EMA) | machine slept mid-epoch; epoch 3 pending |
+| 09-12 | GRU 192×2, soft mask, **seq-loss** (proxy) | 0.5887 proxy / **0.6083 held-out 192** | vs 0.5753 / 0.6011 for the same run with the chunk loss; beats the baseline (0.6062) on identical rows with 20% of the data, 1 epoch |
 
 **Drift finding.** On the held-out set gru192_e1 beats the baseline in every
 quarter of the sequence (0.64/0.64/0.62/0.60 vs 0.61/0.61/0.58/0.58) but
 loses on whole sequences: its prediction level drifts within a sequence.
 Per-chunk Pearson is blind to that; the metric's whole-sequence centring is
-not. `--seq-loss` (running-statistics sequence Pearson) is the candidate fix.
-Always compare against the baseline on the *same* sequences.
+not. `--seq-loss` (running-statistics sequence Pearson) fixes most of it: the
+per-target quarter WPs stay the same but the pooled score rises ~+0.01, and a
+2048-sequence proxy trained with it beats the baseline on identical rows.
+Annealing matters as much as data: both fully-annealed proxies beat the
+mid-schedule epoch-1 checkpoint of the full-data run. Always compare against
+the baseline on the *same* sequences and only judge full runs at the end of
+their LR schedule.
 The scored rows are a distinct regime: the reference model scores 0.58 on
 them and 0.30 on all required rows (or any random 11%). `is_scored` is
 partly predictable from the row itself (GBM AUC 0.83; `a3`, `a2`, `a4` carry
