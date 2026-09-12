@@ -27,7 +27,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from data import (SEQUENCE_LENGTH, STEP_MASK, TRAIN_PATH, VALID_PATH, BatchStream,  # noqa: E402
                   SequenceReader, feature_stats, load_subset)
-from loss import CombinedLoss  # noqa: E402
+from loss import CombinedLoss, SequencePearsonLoss, WeightedMSELoss  # noqa: E402
 from metric import score_batch  # noqa: E402
 from model import ModelConfig, Predictor, count_params  # noqa: E402
 
@@ -94,6 +94,8 @@ def main() -> int:
     ap.add_argument("--warmup", type=float, default=0.05, help="fraction of steps")
     ap.add_argument("--clip", type=float, default=1.0)
     ap.add_argument("--pearson-weight", type=float, default=0.9)
+    ap.add_argument("--seq-loss", action="store_true",
+                    help="sequence-level Pearson with running statistics instead of per-chunk Pearson")
     ap.add_argument("--ema", type=float, default=0.999)
     ap.add_argument("--seqs", type=int, default=0, help="limit training sequences (0 = all)")
     ap.add_argument("--val-seqs", type=int, default=256, help="validation subset for the per-epoch check")
@@ -160,6 +162,7 @@ def main() -> int:
         return args.lr * (0.02 + 0.98 * 0.5 * (1 + math.cos(math.pi * progress)))
 
     criterion = CombinedLoss(args.pearson_weight)
+    seq_pearson, mse = SequencePearsonLoss(), WeightedMSELoss()
     step_mask = torch.from_numpy(STEP_MASK).to(device)
     best = -1.0
     step = 0
@@ -173,6 +176,7 @@ def main() -> int:
             x_all = torch.from_numpy(batch.features).to(device, non_blocking=True)
             y_all = torch.from_numpy(batch.targets).to(device, non_blocking=True)
             state = model.initial_state(x_all.shape[0], device)
+            seq_pearson.reset()
             for t in range(0, SEQUENCE_LENGTH, args.chunk):
                 x = x_all[:, t:t + args.chunk]
                 y = y_all[:, t:t + args.chunk]
@@ -180,7 +184,11 @@ def main() -> int:
                 for g in opt.param_groups:
                     g["lr"] = lr_at(step)
                 pred, state = model(x, state)
-                loss = criterion(pred, y, m)
+                if args.seq_loss:
+                    loss = (args.pearson_weight * seq_pearson.step(pred, y, m)
+                            + (1 - args.pearson_weight) * mse(pred, y, m))
+                else:
+                    loss = criterion(pred, y, m)
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
