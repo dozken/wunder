@@ -152,6 +152,12 @@ mise run submit                                   # -> submission.zip
 | 09-12 | LSTM 256×2 proj64, lr 5e-4 | 0.522 | trains 2.3× faster on MPS (native kernel) |
 | 09-12 | oracle: train on 1500 valid seqs, loss on all rows, 2 ep | 0.569 | held-out valid; overfits in epoch 2 |
 | 09-12 | oracle: same, **loss on is_scored rows only** | **0.605** | +0.04 from matching the metric's row selection |
+| 09-12 | LSTM 256×2 proj128, lr 5e-4 / 1e-3 | 0.525 / 0.545 | GRU beats LSTM at equal size |
+| 09-12 | LSTM 320×2 proj128, lr 5e-4 | 0.528 | |
+| 09-12 | GRU 192×2 proj64, lr 5e-4 | 0.543 | |
+| 09-12 | GRU 256×2 proj128, lr 3e-4 | 0.543 | the 0.589 reference is probably a lucky draw; proxy noise ≈ ±0.03 |
+| 09-12 | GRU 256×2 proj128, **predicted soft mask** | 0.583 | mask model: held-out AUC 0.93, AP 0.66 |
+| 09-12 | GRU 192×2 proj64, **predicted soft mask** | 0.575 | +0.03 over the same model on all rows |
 
 The scored rows are a distinct regime: the reference model scores 0.58 on
 them and 0.30 on all required rows (or any random 11%). `is_scored` is
