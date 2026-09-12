@@ -101,9 +101,49 @@ margin below ~2x):
 | LSTM 256×1 + proj 64 | 420k | 35 | 22 |
 | LSTM 256×2 + proj 64 | 947k | 69 | 37 |
 
-ONNX Runtime has a dynamic-int8 kernel for LSTM but not for GRU, so a
-quantised LSTM buys roughly twice the capacity per microsecond. Ensembles
-multiply cost linearly. Per-call fixed overhead is ~20 µs.
+ONNX Runtime has a dynamic-int8 kernel for LSTM but not for GRU, so on the
+Mac a quantised LSTM buys roughly twice the capacity per microsecond.
+Ensembles multiply cost linearly. Per-call fixed overhead is ~20 µs.
+
+### x86 is a different machine
+
+The same graphs measured on a cloud Xeon (Sapphire Rapids 2.1 GHz, KVM, one
+pinned core, no steal) tell a different story: ORT's fused `GRU`/`LSTM`
+kernels are 2–4× slower than on Apple silicon, the cost grows superlinearly
+once the fp32 weights spill the 2 MiB per-core L2, and the int8 LSTM kernel
+gives nothing. The first packaged zip (`submissions/2026-09-12_gru192_e1`)
+came out at **100 µs/row = 0.96× headroom** there.
+
+The fix is `src/unroll.py`: rewrite each fused RNN op as an explicit one-step
+cell (MatMul + elementwise, fp32 parity 6e-7), which lets the recurrent
+weights be quantised. Weight-only 8-bit `MatMulNBits` (block 32, int8
+compute) is the sweet spot; 4-bit is lossier *and* slower here.
+
+Raw ORT µs/row on that Xeon, one row per call (add ~10 µs for the wrapper):
+
+| model | params | fused fp32 | unrolled fp32 | unrolled dyn-int8 | unrolled 8-bit |
+|---|---:|---:|---:|---:|---:|
+| GRU 128×2 + proj 64 | 206k | 37 | 39 | 41 | – |
+| GRU 192×2 + proj 64 (trained gru192_e1) | 429k | 82 | 100 | 55 | **38** |
+| GRU 256×2 + proj 64 | 733k | 167 | 180 | 57 | 54 |
+| GRU 256×2 + proj 128 | 801k | 202 | 181 | – | 61 |
+| GRU 320×2 + proj 128 | 1.2M | – | – | – | 96 |
+| LSTM 192×2 + proj 64 | 597k | 134 | 130 | 42 | – |
+| LSTM 256×2 + proj 64 | 947k | 234 | 253 | 67 | – |
+| LSTM 320×2 + proj 64 | 1.4M | 332 | 328 | 97 | – |
+
+Drift of the 8-bit gru192_e1 graph against fp32 over a 20k-row synthetic
+sequence: prediction correlation 0.99997, relative RMS 0.7 %. Dynamic int8
+(activations quantised per call too) is 0.99994 / 1.0 %.
+
+`solution.py` also binds inputs/outputs once and ping-pongs the state between
+two buffers (ORT IO binding), which is bit-identical and saves ~5 µs/row.
+End to end the 8-bit gru192_e1 package runs at **47 µs/row on the Xeon, 2.0×
+headroom**; it is in `submissions/2026-09-12_gru192_e1_x86`.
+
+Sizing rule for x86 until a real submission calibrates it: **GRU 256×2 8-bit
+is the largest single model that fits** (~65 µs/row end to end, 1.5×); a
+192×2 leaves room for a 2-model ensemble.
 
 ## Workflow
 
@@ -113,6 +153,7 @@ python src/train.py --tag dev --seqs 512 --epochs 2
 python src/train.py --tag gru192 --hidden 192 --epochs 8
 python src/score.py --checkpoint runs/gru192/best.pt      # full valid, batched
 python src/export.py runs/gru192/best.pt src/model_a.onnx  # + parity check
+python src/unroll.py src/model_a.onnx src/model_a_x86.onnx --quant nbits8 --check  # x86-fast graph
 python src/score.py --strict --seqs 20                    # organisers' scorer path
 cd src && python -m pytest test_contract.py -v
 mise run docker-test                              # 1 CPU container, SEQS=20
@@ -159,6 +200,7 @@ mise run submit                                   # -> submission.zip
 | 09-12 | GRU 256×2 proj128, **predicted soft mask** | 0.583 | mask model: held-out AUC 0.93, AP 0.66 |
 | 09-12 | GRU 192×2 proj64, **predicted soft mask** | 0.575 | +0.03 over the same model on all rows |
 | 09-12 | **full data**, GRU 192×2 proj64, soft mask, epoch 1 of 2 | **0.5955** (EMA, 192 held-out seqs) | packaged as `submissions/2026-09-12_gru192_e1`; epoch 2 lost to a session restart |
+| 09-12 | same weights, unrolled + 8-bit `MatMulNBits`, IO-binding wrapper | n/a (no data on the x86 box; corr 0.99997 vs fp32) | `submissions/2026-09-12_gru192_e1_x86`: 100 → 47 µs/row on a cloud Xeon, the fp32 zip was over budget there |
 
 The scored rows are a distinct regime: the reference model scores 0.58 on
 them and 0.30 on all required rows (or any random 11%). `is_scored` is

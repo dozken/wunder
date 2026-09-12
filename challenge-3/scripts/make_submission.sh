@@ -1,16 +1,22 @@
 #!/bin/bash
 # One-shot submission prep:
-#   scripts/make_submission.sh runs/<tag>/best.pt <name> [--int8] [--strict-seqs N] [--docker-seqs N]
+#   scripts/make_submission.sh runs/<tag>/best.pt <name> [--int8] [--unroll MODE] [--strict-seqs N] [--docker-seqs N]
 # Exports the checkpoint to src/<name>.onnx (removing any other .onnx in src/),
 # runs the contract tests, the organisers' row-by-row scorer on a few
 # sequences, the 1-CPU Docker timing, and zips submission.zip.
+#
+# --unroll MODE rewrites the fused GRU/LSTM ops as explicit MatMul cells and
+# quantises them (MODE = nbits8 | dynamic | nbits4, see src/unroll.py). Use
+# nbits8 for anything that ships: the fused kernels are ~2x slower on the
+# scorer's x86 vCPU than on Apple silicon, and this is what buys it back.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CKPT=$1; NAME=$2; shift 2
-INT8=""; STRICT=20; DOCKER=10
+INT8=""; UNROLL=""; STRICT=20; DOCKER=10
 while [ $# -gt 0 ]; do
   case $1 in
     --int8) INT8="--int8";;
+    --unroll) UNROLL=$2; shift;;
     --strict-seqs) STRICT=$2; shift;;
     --docker-seqs) DOCKER=$2; shift;;
     *) echo "unknown arg $1"; exit 1;;
@@ -21,6 +27,11 @@ echo "== export"
 rm -f src/*.onnx
 python3 src/export.py "$CKPT" "src/$NAME.onnx" $INT8 2>&1 | grep -v -i -E "warning|torch.onnx|_generic_rnn"
 if [ -n "$INT8" ]; then rm -f "src/$NAME.onnx"; fi     # keep only the int8 graph
+if [ -n "$UNROLL" ]; then
+  echo "== unroll + $UNROLL quantisation"
+  python3 src/unroll.py "src/$NAME.onnx" "src/${NAME}_$UNROLL.onnx" --quant "$UNROLL" --check --rows 5000 2>&1 | grep -v -i warning
+  rm -f "src/$NAME.onnx" "src/${NAME}_$UNROLL.fp32.onnx"   # ship only the quantised graph
+fi
 ls -la src/*.onnx
 
 echo "== contract tests"
