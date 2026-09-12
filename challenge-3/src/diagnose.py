@@ -81,6 +81,12 @@ def report(name: str, preds: np.ndarray, v) -> None:
     drift = np.abs(wmean(preds, slice(3 * q, None)) - wmean(preds, slice(0, q))).mean() / (preds[:, 99:].std() + 1e-8)
     print(f"{name:32s} full {full['weighted_pearson']:.4f} (t0 {full['t0']:.4f} t1 {full['t1']:.4f})  "
           f"quarters {' '.join(f'{x:.4f}' for x in quarters)}  level-drift {drift:.3f}")
+    for k in range(2):
+        qk = [score_batch(v.targets[:, i * q:(i + 1) * q], preds[:, i * q:(i + 1) * q],
+                          v.scored[:, i * q:(i + 1) * q])[f"t{k}"] for i in range(4)]
+        scale = [float(preds[:, max(i * q, 99):(i + 1) * q, k].std()) for i in range(4)]
+        print(f"{'':32s}   t{k} quarters {' '.join(f'{x:.4f}' for x in qk)}   pred std by quarter "
+              f"{' '.join(f'{x:.3f}' for x in scale)}   target std {v.targets[:, 99:, k].std():.3f}")
 
 
 def main() -> int:
