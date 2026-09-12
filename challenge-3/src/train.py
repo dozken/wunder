@@ -85,6 +85,7 @@ def main() -> int:
     ap.add_argument("--layers", type=int, default=2)
     ap.add_argument("--proj", type=int, default=128)
     ap.add_argument("--dropout", type=float, default=0.1)
+    ap.add_argument("--diff", action="store_true", help="feed first differences alongside the raw row")
     ap.add_argument("--batch", type=int, default=128, help="sequences per batch")
     ap.add_argument("--chunk", type=int, default=1000, help="TBPTT length in rows")
     ap.add_argument("--epochs", type=int, default=6)
@@ -129,7 +130,8 @@ def main() -> int:
     mean, std = feature_stats(train_reader, args.stats_seqs, args.seed)
     print(f"loaded validation subset + feature stats in {time.time() - t0:.0f}s", flush=True)
 
-    cfg = ModelConfig(rnn=args.rnn, hidden=args.hidden, layers=args.layers, proj=args.proj, dropout=args.dropout)
+    cfg = ModelConfig(rnn=args.rnn, hidden=args.hidden, layers=args.layers, proj=args.proj,
+                      dropout=args.dropout, diff=args.diff)
     model = Predictor(cfg, mean, std).to(device)
     ema = EMA(model, args.ema)
     print(f"model {cfg.to_dict()} params={count_params(model):,}", flush=True)
