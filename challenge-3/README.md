@@ -118,3 +118,24 @@ cd src && python -m pytest test_contract.py -v
 mise run docker-test                              # 1 CPU container, SEQS=20
 mise run submit                                   # -> submission.zip
 ```
+
+## Data notes (from `src/eda.py`, 48+48 sampled sequences)
+
+*   Features are **already rank-transformed and clipped**: every group lives in
+    roughly [-2.4, 2.4] with mass piled at ±2.32 (the clip), `a0..a7` reach ±5.2.
+    "Price-like" columns are not prices — no monotone ordering within a row,
+    ask−bid signs are arbitrary per index — so book-geometry feature engineering
+    from Challenge 2 does not apply. Standardisation is a no-op in practice.
+*   Targets: std ≈ 0.95, ~22% exact zeros (zero weight in the metric), 3% beyond
+    the ±2 clip. **`t0` and `t1` are strongly anti-correlated (−0.74)**.
+*   Targets are smooth: within-sequence autocorrelation 0.96 at lag 1, 0.78 at
+    lag 20, 0.41 at lag 100, ~0 by lag 500. They behave like overlapping
+    forward-looking windows of a few hundred rows.
+*   Scoring mask covers ~11% of required rows in ~540 short runs per sequence
+    (median run length 2); first scored row is typically ~170. Scored rows have
+    slightly larger |t| than unscored ones.
+*   Regime structure is real: per-sequence feature means spread by ~0.5 global
+    std across sequences and drift by 0.2–0.45 std within a sequence.
+*   Matching `i0`/`i1` columns are only weakly correlated (|r| < 0.3).
+*   A 256-sequence, 1-epoch smoke run already reaches val WP 0.525, so the
+    problem saturates quickly; differences between good models will be small.

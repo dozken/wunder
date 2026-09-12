@@ -29,6 +29,14 @@ def load_checkpoint(path: Path):
     return model, ckpt
 
 
+def quantize_int8(src: Path, dst: Path) -> None:
+    """Dynamic int8 weights. ONNX Runtime has a quantised LSTM kernel (about 2x
+    faster than fp32 at batch 1) but no quantised GRU, so this only pays for
+    LSTM models. Check the WP impact with score.py --strict before shipping."""
+    from onnxruntime.quantization import QuantType, quantize_dynamic
+    quantize_dynamic(str(src), str(dst), weight_type=QuantType.QInt8)
+
+
 def export(model, out_path: Path) -> None:
     x = torch.zeros(1, 1, 112)
     state = model.initial_state(1)
@@ -70,6 +78,7 @@ def main() -> int:
     ap.add_argument("checkpoint", type=Path)
     ap.add_argument("out", type=Path)
     ap.add_argument("--no-verify", action="store_true")
+    ap.add_argument("--int8", action="store_true", help="also write <out>.int8.onnx with dynamic int8 weights")
     args = ap.parse_args()
 
     model, ckpt = load_checkpoint(args.checkpoint)
@@ -82,6 +91,14 @@ def main() -> int:
         if diff > 1e-3:
             print("MISMATCH: exported graph does not reproduce the torch model", file=sys.stderr)
             return 1
+    if args.int8:
+        q_path = args.out.with_suffix(".int8.onnx")
+        quantize_int8(args.out, q_path)
+        print(f"quantised {q_path} ({q_path.stat().st_size / 1e6:.2f} MB)")
+        if not args.no_verify:
+            diff = verify(model, q_path)
+            print(f"torch vs int8 onnxruntime max abs diff over 2000 rows: {diff:.2e} "
+                  f"(expected ~1e-2; confirm WP with score.py --strict)")
     return 0
 
 
