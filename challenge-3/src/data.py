@@ -94,8 +94,9 @@ def collate(sequences: list[Sequence]) -> Batch:
     features = np.stack([s.features for s in sequences])
     targets = np.stack([s.targets for s in sequences])
     scored = None
-    if sequences[0].scored is not None:
-        scored = np.stack([s.scored for s in sequences])
+    if all(s.scored is not None for s in sequences):
+        # real masks are bool, predicted ones float; a mixed batch becomes float
+        scored = np.stack([s.scored.astype(np.float32) for s in sequences])
     return Batch(features, targets, scored)
 
 
@@ -103,25 +104,43 @@ class BatchStream:
     """Yields batches of whole sequences in a random order, prefetched in a thread.
 
     `indices` restricts an epoch to a subset of row groups (for dev runs and for
-    holding out sequences). Each epoch reshuffles.
+    holding out sequences). Each epoch reshuffles. Pass `extra=[(reader,
+    indices), ...]` to draw from more files in the same epoch, e.g. the masked
+    validation file alongside the training file; batches then mix sources.
     """
 
     def __init__(self, reader: SequenceReader, batch_size: int, indices=None,
-                 seed: int = 0, prefetch: int = 1, workers: int = 8, drop_last: bool = True):
-        self.reader = reader
+                 seed: int = 0, prefetch: int = 1, workers: int = 8, drop_last: bool = True,
+                 extra=()):
+        self.sources = [(reader, np.arange(len(reader)) if indices is None else np.asarray(indices))]
+        self.sources += [(r, np.asarray(ix)) for r, ix in extra]
         self.batch_size = batch_size
-        self.indices = np.arange(len(reader)) if indices is None else np.asarray(indices)
         self.rng = np.random.default_rng(seed)
         self.prefetch = prefetch
         self.workers = workers
         self.drop_last = drop_last
 
+    def __len__(self) -> int:
+        return sum(len(ix) for _, ix in self.sources)
+
     def batches_per_epoch(self) -> int:
-        n = len(self.indices)
+        n = len(self)
         return n // self.batch_size if self.drop_last else (n + self.batch_size - 1) // self.batch_size
 
+    def _read(self, keys) -> list[Sequence]:
+        """keys: (source, row_group) pairs; reads each source's part in parallel."""
+        out = [None] * len(keys)
+        with ThreadPoolExecutor(self.workers) as pool:
+            futures = {pool.submit(self.sources[src][0].read, int(rg)): pos
+                       for pos, (src, rg) in enumerate(keys)}
+            for fut, pos in futures.items():
+                out[pos] = fut.result()
+        return out
+
     def __iter__(self):
-        order = self.rng.permutation(self.indices)
+        keys = np.concatenate([np.stack([np.full(len(ix), s), ix], axis=1)
+                               for s, (_, ix) in enumerate(self.sources)])
+        order = keys[self.rng.permutation(len(keys))]
         chunks = [order[i:i + self.batch_size] for i in range(0, len(order), self.batch_size)]
         if self.drop_last and chunks and len(chunks[-1]) < self.batch_size:
             chunks.pop()
@@ -131,7 +150,7 @@ class BatchStream:
         def producer():
             try:
                 for idx in chunks:
-                    q.put(collate(self.reader.read_many(idx, self.workers)))
+                    q.put(collate(self._read(idx)))
             except Exception as exc:  # surface reader errors in the consumer
                 q.put(exc)
             finally:

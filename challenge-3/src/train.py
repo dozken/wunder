@@ -106,6 +106,8 @@ def main() -> int:
                     help="rows the loss sees: all required rows, the is_scored rows, or the predicted "
                          "P(is_scored) weights from --soft-mask")
     ap.add_argument("--soft-mask", default=None, help="float16 memmap from maskmodel.py label")
+    ap.add_argument("--add-valid", action="store_true",
+                    help="also train on the validation sequences not held out (their real is_scored mask)")
     ap.add_argument("--val-seqs", type=int, default=192, help="validation subset for the per-epoch check")
     ap.add_argument("--stats-seqs", type=int, default=128)
     ap.add_argument("--device", default="auto")
@@ -142,11 +144,18 @@ def main() -> int:
         train_idx = rng.choice(train_idx, size=min(args.seqs, len(train_idx)), replace=False)
     if args.loss_mask != "all" and not train_reader.has_mask:
         ap.error(f"--loss-mask {args.loss_mask} needs a masked training file or --soft-mask")
+    extra = []
+    if args.add_valid:
+        if args.holdout:
+            ap.error("--add-valid is for training on train.parquet; --holdout already trains on valid")
+        rest = np.setdiff1d(np.arange(len(valid_reader)), val_idx)
+        extra = [(valid_reader, rest)]
     # a fixed slice of training sequences scored with the exact metric: the
     # train/val gap is the overfitting diagnostic
     fit_idx = train_idx[:min(64, len(train_idx))]
 
-    print(f"device={device} train_seqs={len(train_idx)} val_seqs={len(val_idx)}", flush=True)
+    print(f"device={device} train_seqs={len(train_idx)}{' + valid ' + str(len(extra[0][1])) if extra else ''} "
+          f"val_seqs={len(val_idx)}", flush=True)
     t0 = time.time()
     val = load_subset(valid_reader, val_idx, args.workers)
     fit = load_subset(train_reader, fit_idx, args.workers)
@@ -160,7 +169,7 @@ def main() -> int:
     ema = EMA(model, args.ema)
     print(f"model {cfg.to_dict()} params={count_params(model):,}", flush=True)
 
-    stream = BatchStream(train_reader, args.batch, train_idx, seed=args.seed, workers=args.workers)
+    stream = BatchStream(train_reader, args.batch, train_idx, seed=args.seed, workers=args.workers, extra=extra)
     chunks_per_seq = math.ceil(SEQUENCE_LENGTH / args.chunk)
     steps_per_epoch = stream.batches_per_epoch() * chunks_per_seq
     total_steps = steps_per_epoch * args.epochs
