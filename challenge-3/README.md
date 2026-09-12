@@ -169,7 +169,7 @@ mise run submit                                   # -> submission.zip
 | 09-12 | **full data**, GRU 192×2 proj64, soft mask, epoch 1 of 2 | **0.5955** (EMA, 192 held-out seqs) | packaged as `submissions/2026-09-12_gru192_e1`; epoch 2 lost to a session restart |
 | 09-12 | ↳ submitted as `25KKGXOR` | **public 0.5617** (#76) | baseline's public score is 0.5719; 45m40s runtime |
 | 09-12 | provided baseline on the same 192 held-out seqs | 0.6062 | so gru192_e1 was −0.011 locally too — the held-out subset is easier than the full valid (0.5896); no generalisation gap |
-| 09-12 | train + valid mix, GRU 192×2, soft mask, epoch 1 of 3 | 0.5747 (EMA) | machine slept mid-epoch; epoch 3 pending |
+| 09-12 | train + valid mix, GRU 192×2, soft mask, chunk loss, epochs 1 / 2 | 0.5747 / 0.5527 (EMA) | gets *worse* with training under the chunk loss; killed before epoch 3 |
 | 09-12 | GRU 192×2, soft mask, **seq-loss** (proxy) | 0.5887 proxy / **0.6083 held-out 192** | vs 0.5753 / 0.6011 for the same run with the chunk loss; beats the baseline (0.6062) on identical rows with 20% of the data, 1 epoch |
 
 **Drift finding.** On the held-out set gru192_e1 beats the baseline in every
