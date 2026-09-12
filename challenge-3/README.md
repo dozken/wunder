@@ -158,6 +158,7 @@ mise run submit                                   # -> submission.zip
 | 09-12 | GRU 256×2 proj128, lr 3e-4 | 0.543 | the 0.589 reference is probably a lucky draw; proxy noise ≈ ±0.03 |
 | 09-12 | GRU 256×2 proj128, **predicted soft mask** | 0.583 | mask model: held-out AUC 0.93, AP 0.66 |
 | 09-12 | GRU 192×2 proj64, **predicted soft mask** | 0.575 | +0.03 over the same model on all rows |
+| 09-12 | **full data**, GRU 192×2 proj64, soft mask, epoch 1 of 2 | **0.5955** (EMA, 192 held-out seqs) | packaged as `submissions/2026-09-12_gru192_e1`; epoch 2 lost to a session restart |
 
 The scored rows are a distinct regime: the reference model scores 0.58 on
 them and 0.30 on all required rows (or any random 11%). `is_scored` is

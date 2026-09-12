@@ -42,3 +42,7 @@ Thumbs.db
 
 # Training runs (checkpoints, logs)
 runs/
+
+# Packaged submissions are kept (small ONNX graphs)
+!challenge-3/submissions/**/*.onnx
+!challenge-3/submissions/**/*.zip
