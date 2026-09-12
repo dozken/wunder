@@ -123,10 +123,15 @@ def main() -> int:
     if args.seqs:
         train_idx = rng.choice(train_idx, size=args.seqs, replace=False)
     val_idx = rng.choice(len(valid_reader), size=min(args.val_seqs, len(valid_reader)), replace=False)
+    # a fixed slice of training sequences scored with the exact metric: the
+    # train/val gap is the overfitting diagnostic
+    fit_idx = train_idx[:min(64, len(train_idx))]
 
     print(f"device={device} train_seqs={len(train_idx)} val_seqs={len(val_idx)}", flush=True)
     t0 = time.time()
     val = load_subset(valid_reader, val_idx, args.workers)
+    fit = load_subset(train_reader, fit_idx, args.workers)
+    fit_scored = np.broadcast_to(STEP_MASK, fit.targets.shape[:2])
     mean, std = feature_stats(train_reader, args.stats_seqs, args.seed)
     print(f"loaded validation subset + feature stats in {time.time() - t0:.0f}s", flush=True)
 
@@ -194,10 +199,11 @@ def main() -> int:
 
         scores = evaluate(ema.shadow, val.features, val.targets, val.scored, device)
         raw = evaluate(model, val.features, val.targets, val.scored, device)
+        fit_raw = evaluate(model, fit.features, fit.targets, fit_scored, device)
         print(f"== epoch {epoch} done in {(time.time() - t_epoch) / 60:.1f} min: "
               f"val WP ema {scores['weighted_pearson']:.4f} (t0 {scores['t0']:.4f} t1 {scores['t1']:.4f}) "
-              f"raw {raw['weighted_pearson']:.4f}", flush=True)
-        log(epoch=epoch, step=step, val_ema=scores, val_raw=raw)
+              f"raw {raw['weighted_pearson']:.4f} | train-subset WP raw {fit_raw['weighted_pearson']:.4f}", flush=True)
+        log(epoch=epoch, step=step, val_ema=scores, val_raw=raw, fit_raw=fit_raw)
 
         use_ema = scores["weighted_pearson"] >= raw["weighted_pearson"]
         current = max(scores["weighted_pearson"], raw["weighted_pearson"])
