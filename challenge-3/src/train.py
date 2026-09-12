@@ -98,7 +98,7 @@ def main() -> int:
                     help="sequence-level Pearson with running statistics instead of per-chunk Pearson")
     ap.add_argument("--ema", type=float, default=0.999)
     ap.add_argument("--seqs", type=int, default=0, help="limit training sequences (0 = all)")
-    ap.add_argument("--val-seqs", type=int, default=256, help="validation subset for the per-epoch check")
+    ap.add_argument("--val-seqs", type=int, default=192, help="validation subset for the per-epoch check")
     ap.add_argument("--stats-seqs", type=int, default=128)
     ap.add_argument("--device", default="auto")
     ap.add_argument("--seed", type=int, default=0)

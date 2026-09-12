@@ -98,7 +98,7 @@ class BatchStream:
     """
 
     def __init__(self, reader: SequenceReader, batch_size: int, indices=None,
-                 seed: int = 0, prefetch: int = 2, workers: int = 8, drop_last: bool = True):
+                 seed: int = 0, prefetch: int = 1, workers: int = 8, drop_last: bool = True):
         self.reader = reader
         self.batch_size = batch_size
         self.indices = np.arange(len(reader)) if indices is None else np.asarray(indices)
@@ -152,9 +152,15 @@ def feature_stats(reader: SequenceReader, n_sequences: int = 128, seed: int = 0)
     """
     rng = np.random.default_rng(seed)
     idx = rng.choice(len(reader), size=min(n_sequences, len(reader)), replace=False)
-    batch = load_subset(reader, idx)
-    x = batch.features.reshape(-1, N_FEATURES).astype(np.float64)
-    mean = x.mean(axis=0)
-    std = x.std(axis=0)
+    total = np.zeros(N_FEATURES, dtype=np.float64)
+    total_sq = np.zeros(N_FEATURES, dtype=np.float64)
+    count = 0
+    for seq in reader.read_many(idx):                 # one sequence at a time, no big copy
+        x = seq.features.astype(np.float64)
+        total += x.sum(axis=0)
+        total_sq += (x * x).sum(axis=0)
+        count += len(x)
+    mean = total / count
+    std = np.sqrt(np.maximum(total_sq / count - mean * mean, 0.0))
     std[std < 1e-6] = 1.0
     return mean.astype(np.float32), std.astype(np.float32)
