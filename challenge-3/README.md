@@ -139,3 +139,22 @@ mise run submit                                   # -> submission.zip
 *   Matching `i0`/`i1` columns are only weakly correlated (|r| < 0.3).
 *   A 256-sequence, 1-epoch smoke run already reaches val WP 0.525, so the
     problem saturates quickly; differences between good models will be small.
+
+## Experiment log (dev proxy: 2048 train seqs, 1 epoch, 128 val seqs unless noted)
+
+| date | run | val WP | note |
+|---|---|---|---|
+| 09-12 | GRU 256×2 proj128, lr 2e-3 | 0.433 | peak LR held too long wrecks it |
+| 09-12 | same, lr 1e-3 | 0.505 | |
+| 09-12 | same, **lr 5e-4** | **0.589** | reference recipe |
+| 09-12 | same, lr 5e-4, seq-level Pearson loss | 0.570 | all-rows sequence objective is the wrong target |
+| 09-12 | same, lr 5e-4, chunk 2000 | 0.559 | half the optimiser steps |
+| 09-12 | LSTM 256×2 proj64, lr 5e-4 | 0.522 | trains 2.3× faster on MPS (native kernel) |
+| 09-12 | oracle: train on 1500 valid seqs, loss on all rows, 2 ep | 0.569 | held-out valid; overfits in epoch 2 |
+| 09-12 | oracle: same, **loss on is_scored rows only** | **0.605** | +0.04 from matching the metric's row selection |
+
+The scored rows are a distinct regime: the reference model scores 0.58 on
+them and 0.30 on all required rows (or any random 11%). `is_scored` is
+partly predictable from the row itself (GBM AUC 0.83; `a3`, `a2`, `a4` carry
+most of it) and is sticky (P(scored | previous scored) = 0.77), so a
+sequence model should do better — see `src/maskmodel.py`.
