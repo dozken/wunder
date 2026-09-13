@@ -44,8 +44,8 @@ if run r3; then
   rm -f src/*.onnx
   python3 src/export_slim.py runs/full_seq_mix/best.pt src/a.onnx
   python3 src/export_slim.py runs/seq_gru192_s1/best.pt src/b.onnx
-  python3 src/unroll.py src/a.onnx src/a_nbits8.onnx --quant dynamic
-  python3 src/unroll.py src/b.onnx src/b_nbits8.onnx --quant dynamic
+  python3 src/unroll.py src/a.onnx src/a_dyn.onnx --quant dynamic
+  python3 src/unroll.py src/b.onnx src/b_dyn.onnx --quant dynamic
   rm -f src/a.onnx src/b.onnx src/*.fp32.onnx
   (cd src && python3 -m pytest test_contract.py -q | tail -1)
   python3 src/score.py --strict --seqs 20
