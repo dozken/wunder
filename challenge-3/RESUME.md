@@ -1,9 +1,10 @@
 # Resume notes (paused 2026-09-13 ~19:10)
 
-State when paused: `full_seq_5ep` (epoch 5/5) and `teacher384` (epoch 3/3) were
-finishing on their own (~20:00). Their results land in `runs/full_seq_5ep.out`
-and `runs/teacher384.out` (`grep "^=="`). Best held-out so far: 0.6659 (5-epoch
-run, epoch 3). Upload gate: projected public top-5 → held-out ≥ ~0.681
+State when paused: `full_seq_5ep` finished (see below); `teacher384` finished at ~20:00 and is
+shipped as `checkpoints/teacher384.pt`. Their results land in `runs/full_seq_5ep.out`
+and `runs/teacher384.out` (`grep "^=="`). Best held-out so far: **0.6671** (`full_seq_5ep`, epoch 5, shipped as
+`checkpoints/seq_5ep.pt`; quarters 0.70/0.67/0.65/0.64 — late-sequence rows do not improve
+with more epochs, an open lead). Upload gate: projected public top-5 → held-out ≥ ~0.681
 (#5 was 0.6431; local→public offset ≈ −0.038).
 
 Next steps, in priority order (each ~4–7 h on the Mac; run one at a time with
