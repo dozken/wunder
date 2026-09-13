@@ -72,7 +72,7 @@ def evaluate(model: Predictor, features: np.ndarray, targets: np.ndarray, scored
         state = model.initial_state(x.shape[0], device)
         for t in range(0, SEQUENCE_LENGTH, chunk):
             out, state = model(x[:, t:t + chunk], state)
-            preds[i:i + batch, t:t + chunk] = out.float().cpu().numpy()
+            preds[i:i + batch, t:t + chunk] = out[..., :2].float().cpu().numpy()
     model.train()
     result = score_batch(targets, preds, scored)
     q = SEQUENCE_LENGTH // 4
@@ -98,6 +98,8 @@ def main() -> int:
     ap.add_argument("--warmup", type=float, default=0.05, help="fraction of steps")
     ap.add_argument("--clip", type=float, default=1.0)
     ap.add_argument("--pearson-weight", type=float, default=0.9)
+    ap.add_argument("--aux-mask", type=float, default=0.0,
+                    help="weight of an auxiliary BCE head predicting is_scored (third output channel, dropped at export)")
     ap.add_argument("--seq-loss", action="store_true",
                     help="sequence-level Pearson with running statistics instead of per-chunk Pearson")
     ap.add_argument("--ema", type=float, default=0.999)
@@ -168,7 +170,7 @@ def main() -> int:
     print(f"loaded validation subset + feature stats in {time.time() - t0:.0f}s", flush=True)
 
     cfg = ModelConfig(rnn=args.rnn, hidden=args.hidden, layers=args.layers, proj=args.proj,
-                      dropout=args.dropout, diff=args.diff)
+                      dropout=args.dropout, diff=args.diff, out=3 if args.aux_mask > 0 else 2)
     model = Predictor(cfg, mean, std).to(device)
     ema = EMA(model, args.ema)
     print(f"model {cfg.to_dict()} params={count_params(model):,}", flush=True)
@@ -215,12 +217,19 @@ def main() -> int:
                 m = m_all[:, t:t + args.chunk]
                 for g in opt.param_groups:
                     g["lr"] = lr_at(step)
-                pred, state = model(x, state)
+                out, state = model(x, state)
+                pred = out[..., :2]
                 if args.seq_loss:
                     loss = (args.pearson_weight * seq_pearson.step(pred, y, m)
                             + (1 - args.pearson_weight) * mse(pred, y, m))
                 else:
                     loss = criterion(pred, y, m)
+                if args.aux_mask > 0:
+                    # target: real mask on valid rows, predicted probability on train rows;
+                    # only required (post warm-up) rows count
+                    req = step_mask[t:t + args.chunk].to(out.dtype).expand(x.shape[0], -1)
+                    bce = torch.nn.functional.binary_cross_entropy_with_logits(out[..., 2], m.to(out.dtype), reduction="none")
+                    loss = loss + args.aux_mask * (bce * req).sum() / req.sum()
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)

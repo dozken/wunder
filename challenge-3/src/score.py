@@ -50,7 +50,7 @@ def fast(checkpoint: Path, device_name: str, batch: int, limit: int) -> dict:
             preds = np.zeros(b.targets.shape, dtype=np.float32)
             for t in range(0, SEQUENCE_LENGTH, 4000):
                 out, state = model(x[:, t:t + 4000], state)
-                preds[:, t:t + 4000] = out.float().cpu().numpy()
+                preds[:, t:t + 4000] = out[..., :2].float().cpu().numpy()
             acc.add(b.targets, preds, b.scored)
             print(f"  {acc.blocks}/{len(indices)} sequences  running WP {acc.result()['weighted_pearson']:.4f}  {time.time() - t0:.0f}s", flush=True)
     result = acc.result()

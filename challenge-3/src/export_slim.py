@@ -98,7 +98,7 @@ def build(model) -> onnx.ModelProto:
                                   axis=-1, epsilon=float(hn.eps)))
     h1, h2 = model.head[0], model.head[3]
     const("W_h1", h1.weight.detach().numpy()); const("b_h1", h1.bias.detach().numpy().reshape(1, -1))
-    const("W_h2", h2.weight.detach().numpy()); const("b_h2", h2.bias.detach().numpy().reshape(1, -1))
+    const("W_h2", h2.weight.detach().numpy()[:2]); const("b_h2", h2.bias.detach().numpy()[:2].reshape(1, -1))  # drop any aux channel
     nodes.append(helper.make_node("Gemm", ["cat_n", "W_h1", "b_h1"], ["head_pre"], transB=1))
     nodes.append(helper.make_node("Gelu", ["head_pre"], ["head_act"], domain="com.microsoft"))
     nodes.append(helper.make_node("Gemm", ["head_act", "W_h2", "b_h2"], ["prediction"], transB=1))
@@ -120,7 +120,7 @@ def verify(model, path: Path, rows: int = 3000, seed: int = 0) -> float:
     x = (rng.standard_normal((rows, 112)) * 3).astype(np.float32)
     x[:, 104:] *= 4                                                     # exercise the clip
     ref, _ = model(torch.from_numpy(x).unsqueeze(0), model.initial_state(1))
-    ref = ref.numpy()[0]
+    ref = ref.numpy()[0][:, :2]
     s = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
     names = [i.name for i in s.get_inputs()]
     states = {n: np.zeros((1, 1, model.cfg.hidden), np.float32) for n in names if n != "features"}

@@ -65,7 +65,7 @@ def model_preds(ckpt: Path, v, device) -> np.ndarray:
         state = model.initial_state(x.shape[0], device)
         for t in range(0, SEQUENCE_LENGTH, 4000):
             out, state = model(x[:, t:t + 4000], state)
-            preds[i:i + 32, t:t + 4000] = out.float().cpu().numpy()
+            preds[i:i + 32, t:t + 4000] = out[..., :2].float().cpu().numpy()
     return preds
 
 
