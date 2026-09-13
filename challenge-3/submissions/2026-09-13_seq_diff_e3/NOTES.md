@@ -13,3 +13,5 @@ Local numbers:
 - export parity 9e-7; contract tests 5/5; graph cost same class as e3
 
 Submitted 2026-09-13 09:38 as `211TK6NX` (submission 2/5 that day).
+
+Public score **0.6221** (same as seq_mix_e3), runtime 39m29s.
