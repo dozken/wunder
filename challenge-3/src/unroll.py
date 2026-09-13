@@ -48,6 +48,75 @@ def _fetch(model, name):
     raise KeyError(f"{name} is neither an initializer nor a Constant; weights must be static")
 
 
+def _consumers(model, name):
+    return [n for n in model.graph.node if name in n.input]
+
+
+def _rewire(model, old, new):
+    for n in model.graph.node:
+        for i, inp in enumerate(n.input):
+            if inp == old:
+                n.input[i] = new
+    for o in model.graph.output:
+        if o.name == old:
+            o.name = new
+
+
+def fold_standardise(model: onnx.ModelProto) -> onnx.ModelProto:
+    """Fold features -> Mul(inv_std) -> Add(shift) -> Clip -> Gemm(W, b, transB=1)
+    into a single Gemm. The Clip is dropped: it sits at +-10 standardised units
+    and the features are bounded at +-5.2 by construction, so it never fires."""
+    model = onnx.ModelProto.FromString(model.SerializeToString())
+    nodes = list(model.graph.node)
+    try:
+        mul = next(n for n in nodes if n.op_type == "Mul" and n.input[0] == "features")
+        add = next(n for n in nodes if n.op_type == "Add" and n.input[0] == mul.output[0])
+        clip = next(n for n in nodes if n.op_type == "Clip" and n.input[0] == add.output[0])
+        gemm = next(n for n in nodes if n.op_type == "Gemm" and n.input[0] == clip.output[0])
+    except StopIteration:
+        return model
+    attrs = {a.name: H.get_attribute_value(a) for a in gemm.attribute}
+    if attrs.get("transB", 0) != 1:
+        return model
+    inv_std = _fetch(model, mul.input[1]).reshape(-1)
+    shift = _fetch(model, add.input[1]).reshape(-1)
+    W = _fetch(model, gemm.input[1])                     # (P, 112)
+    b = _fetch(model, gemm.input[2]).reshape(-1)         # (P,)
+    W2 = (W * inv_std[None, :]).astype(np.float32)
+    b2 = (b + W @ shift).astype(np.float32).reshape(1, -1)
+    inits = _inits(model)
+    for name, arr in ((gemm.input[1], W2), (gemm.input[2], b2)):
+        old = inits[name]
+        old.CopyFrom(NH.from_array(arr, name))
+    gemm.input[0] = "features"
+    for n in (mul, add, clip):
+        model.graph.node.remove(n)
+    return model
+
+
+def states_2d(model: onnx.ModelProto) -> onnx.ModelProto:
+    """Slim graphs carry (1, 1, H) states with an Unsqueeze before the first
+    GRU and a Reshape after the last. Make the states (1, H) and drop both."""
+    model = onnx.ModelProto.FromString(model.SerializeToString())
+    changed = False
+    for vi in list(model.graph.input) + list(model.graph.output):
+        dims = [d.dim_value for d in vi.type.tensor_type.shape.dim]
+        if vi.name != "features" and vi.name != "prediction" and len(dims) == 3 and dims[:2] == [1, 1]:
+            del vi.type.tensor_type.shape.dim[0]
+            changed = True
+    if not changed:
+        return model
+    for n in list(model.graph.node):
+        if n.op_type == "Unsqueeze" and any(c.op_type in ("GRU", "LSTM") for c in _consumers(model, n.output[0])):
+            _rewire(model, n.output[0], n.input[0])
+            model.graph.node.remove(n)
+        elif n.op_type == "Reshape" and any(n.input[0] == o.name for o in model.graph.output):
+            _rewire(model, n.output[0], n.input[0])
+            model.graph.node.remove(n)
+    # the fused ops still expect 3D; the unroll pass replaces them with 2D-agnostic MatMuls.
+    return model
+
+
 def unroll(model: onnx.ModelProto) -> onnx.ModelProto:
     """Return a copy with every GRU/LSTM node replaced by explicit ops."""
     model = onnx.ModelProto.FromString(model.SerializeToString())
@@ -83,7 +152,8 @@ def unroll(model: onnx.ModelProto) -> onnx.ModelProto:
             if attrs.get("linear_before_reset", 0) != 1:
                 raise ValueError("GRU must use linear_before_reset=1 (PyTorch export does)")
             h0 = node.input[5]
-            y_out, yh_out = node.output[0], node.output[1] if len(node.output) > 1 else p + "yh"
+            y_out = node.output[0]
+            yh_out = node.output[1] if len(node.output) > 1 and node.output[1] else p + "yh"
             # gi = x W^T + Wb ; gh = h R^T + Rb  (gate order z, r, n)
             n("MatMul", [x, Wt], [p + "gi0"])
             n("Add", [p + "gi0", add_init(p + "bi", Wb)], [p + "gi"])
@@ -103,7 +173,8 @@ def unroll(model: onnx.ModelProto) -> onnx.ModelProto:
             n("Sub", [h0, p + "nn"], [p + "hmn"])
             n("Mul", [p + "z", p + "hmn"], [p + "zh"])
             n("Add", [p + "nn", p + "zh"], [yh_out])
-            n("Unsqueeze", [yh_out, add_init(p + "ax1", np.array([1], np.int64))], [y_out])
+            if y_out:
+                n("Unsqueeze", [yh_out, add_init(p + "ax1", np.array([1], np.int64))], [y_out])
         else:  # LSTM, gate order i, o, f, c
             h0, c0 = node.input[5], node.input[6]
             y_out = node.output[0]
@@ -124,7 +195,8 @@ def unroll(model: onnx.ModelProto) -> onnx.ModelProto:
             n("Add", [p + "fc", p + "ic"], [yc_out])
             n("Tanh", [yc_out], [p + "tc"])
             n("Mul", [p + "o", p + "tc"], [yh_out])
-            n("Unsqueeze", [yh_out, add_init(p + "ax1", np.array([1], np.int64))], [y_out])
+            if y_out:
+                n("Unsqueeze", [yh_out, add_init(p + "ax1", np.array([1], np.int64))], [y_out])
 
     del model.graph.node[:]
     model.graph.node.extend(new_nodes)
@@ -183,16 +255,24 @@ def synthetic_sequence(rows: int, seed: int = 0) -> np.ndarray:
 
 
 def run_sequence(path, x: np.ndarray):
+    """Drive a graph row by row. Works for one packed state (export.py) and for
+    one state per layer (export_slim.py): every non-feature input is state."""
     sess = _session(path)
-    shape = tuple(sess.get_inputs()[1].shape)
-    state = np.zeros(shape, np.float32)
-    feat = np.zeros((1, 1, 112), np.float32)
+    inputs = sess.get_inputs()
+    feat = next(i for i in inputs if i.name == "features")
+    fshape = tuple(d if isinstance(d, int) else 1 for d in feat.shape)
+    state_names = [i.name for i in inputs if i.name != "features"]
+    states = {i.name: np.zeros(tuple(d if isinstance(d, int) else 1 for d in i.shape), np.float32)
+              for i in inputs if i.name != "features"}
+    next_names = [o.name for o in sess.get_outputs() if o.name != "prediction"]
+    out_names = ["prediction"] + next_names
     out = np.zeros((len(x), 2), np.float32)
     t0 = time.perf_counter()
     for t in range(len(x)):
-        feat[0, 0] = x[t]
-        pred, state = sess.run(["prediction", "next_state"], {"features": feat, "state": state})
-        out[t] = pred[0, 0]
+        res = sess.run(out_names, {"features": x[t].reshape(fshape), **states})
+        out[t] = res[0].reshape(-1)
+        for name, val in zip(state_names, res[1:]):
+            states[name] = val
     us = (time.perf_counter() - t0) / len(x) * 1e6
     return out, us
 
@@ -211,9 +291,15 @@ def main() -> int:
     ap.add_argument("--quant", choices=["dynamic", "nbits8", "nbits4"], default=None)
     ap.add_argument("--check", action="store_true", help="parity + drift on a 20k-row synthetic sequence")
     ap.add_argument("--rows", type=int, default=20000)
+    ap.add_argument("--no-lean", action="store_true",
+                    help="skip folding the standardisation into the first Gemm and the 2D-state rewrite")
     args = ap.parse_args()
 
-    model = unroll(onnx.load(str(args.src)))
+    model = onnx.load(str(args.src))
+    if not args.no_lean:
+        model = states_2d(fold_standardise(model))
+    model = unroll(model)
+    print(f"{len(model.graph.node)} nodes after rewrite")
     fp32_path = args.dst if args.quant is None else args.dst.with_suffix(".fp32.onnx")
     onnx.save(model, str(fp32_path))
     if args.quant:

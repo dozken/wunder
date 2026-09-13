@@ -136,14 +136,52 @@ Drift of the 8-bit gru192_e1 graph against fp32 over a 20k-row synthetic
 sequence: prediction correlation 0.99997, relative RMS 0.7 %. Dynamic int8
 (activations quantised per call too) is 0.99994 / 1.0 %.
 
-`solution.py` also binds inputs/outputs once and ping-pongs the state between
-two buffers (ORT IO binding), which is bit-identical and saves ~5 µs/row.
-End to end the 8-bit gru192_e1 package runs at **47 µs/row on the Xeon, 2.0×
-headroom**; it is in `submissions/2026-09-12_gru192_e1_x86`.
+`solution.py` binds inputs/outputs once and ping-pongs the state between two
+buffer sets (ORT IO binding), bit-identical to the plain wrapper and ~5 µs/row
+cheaper; it accepts one packed state (export.py) or one state per layer
+(export_slim.py), so graphs of either kind can be ensembled.
 
-Sizing rule for x86 until a real submission calibrates it: **GRU 256×2 8-bit
-is the largest single model that fits** (~65 µs/row end to end, 1.5×); a
-192×2 leaves room for a 2-model ensemble.
+**The gain depends on the CPU.** A second cloud host (Xeon 2.8 GHz, 1 MiB L2
+per core, AVX-512 VNNI but no AMX) told a different story from the Sapphire
+Rapids box above: the MatMulNBits kernel leans on AMX and lost most of its
+edge, while dynamic int8 (VNNI) kept a steady ~0.6× of the fused kernel on
+both hosts. Raw ORT µs/row, one row per call:
+
+| model | SPR fused fp32 | SPR dyn-int8 | SPR 8-bit | host 2 fused fp32 | host 2 dyn-int8 | host 2 8-bit |
+|---|---:|---:|---:|---:|---:|---:|
+| GRU 192×2 + proj 64 | 82 | 55 | 38 | 129 | 80 | 100 |
+| GRU 256×2 + proj 64 | 167 | 57 | 54 | 164 | 95 | – |
+| GRU 320×2 + proj 64 | – | – | – | 226 | 117 | – |
+| LSTM 256×2 + proj 64 | 234 | 67 | – | 201 | 110 | – |
+
+Folding the standardisation into the first Gemm and making the states 2D
+(`unroll.py` does both by default, 43 → 38 nodes) changed nothing measurable:
+at this size the int8 GEMV kernels, not the glue, are the cost.
+
+**Sizing for the platform.** Its fused fp32 GRU 192×2 ran at 73 µs/row
+(submission `25KKGXOR`, 45m40s), i.e. ~0.73× the SPR box and ~0.47× host 2.
+Scaling the dynamic-int8 numbers by both factors agrees to within a few µs:
+
+| unrolled + dynamic int8 | projected platform µs/row (end to end) | headroom |
+|---|---:|---:|
+| GRU 192×2 | ~52 | 1.8× |
+| GRU 256×2 | ~56 | 1.7× |
+| GRU 320×2 | ~67 | 1.4× |
+| LSTM 256×2 | ~64 | 1.5× |
+| 2 × GRU 192×2 in one graph | ~92 | 1.0× (too tight) |
+
+So ship `--unroll dynamic` (not nbits8, whose speed depends on AMX), and a
+single GRU 256×2 or 320×2 is affordable where the fused fp32 256×2 was not.
+Confirm every package with the Docker timing before uploading, and treat the
+first upload of a new size as the calibration.
+
+**Calibration from submission `25KKGXOR` (GRU 192×2 proj64, 35 µs/row idle on
+the Mac): the platform took 45m40s for the test set, i.e. ~73 µs/row — the
+scorer's vCPU is ~2× slower than an M-series core.** With a 60 min budget the
+ceiling is ~45 µs/row measured idle on the Mac; GRU 256×2 (57 µs) would time
+out. Capacity gains have to come from cheaper graphs (the ~20 µs fixed
+overhead is more than the GRU-192 compute itself), int8 LSTM if x86 VNNI makes
+it fast there, or better training at equal size.
 
 ## Workflow
 
@@ -153,7 +191,7 @@ python src/train.py --tag dev --seqs 512 --epochs 2
 python src/train.py --tag gru192 --hidden 192 --epochs 8
 python src/score.py --checkpoint runs/gru192/best.pt      # full valid, batched
 python src/export.py runs/gru192/best.pt src/model_a.onnx  # + parity check
-python src/unroll.py src/model_a.onnx src/model_a_x86.onnx --quant nbits8 --check  # x86-fast graph
+python src/unroll.py src/model_a.onnx src/model_a_x86.onnx --quant dynamic --check  # x86-fast graph
 python src/score.py --strict --seqs 20                    # organisers' scorer path
 cd src && python -m pytest test_contract.py -v
 mise run docker-test                              # 1 CPU container, SEQS=20
@@ -201,7 +239,26 @@ mise run submit                                   # -> submission.zip
 | 09-12 | GRU 192×2 proj64, **predicted soft mask** | 0.575 | +0.03 over the same model on all rows |
 | 09-12 | **full data**, GRU 192×2 proj64, soft mask, epoch 1 of 2 | **0.5955** (EMA, 192 held-out seqs) | packaged as `submissions/2026-09-12_gru192_e1`; epoch 2 lost to a session restart |
 | 09-12 | same weights, unrolled + 8-bit `MatMulNBits`, IO-binding wrapper | n/a (no data on the x86 box; corr 0.99997 vs fp32) | `submissions/2026-09-12_gru192_e1_x86`: 100 → 47 µs/row on a cloud Xeon, the fp32 zip was over budget there |
+| 09-12 | ↳ submitted as `25KKGXOR` | **public 0.5617** (#76) | baseline's public score is 0.5719; 45m40s runtime |
+| 09-12 | provided baseline on the same 192 held-out seqs | 0.6062 | so gru192_e1 was −0.011 locally too — the held-out subset is easier than the full valid (0.5896); no generalisation gap |
+| 09-12 | train + valid mix, GRU 192×2, soft mask, chunk loss, epochs 1 / 2 | 0.5747 / 0.5527 (EMA) | gets *worse* with training under the chunk loss; killed before epoch 3 |
+| 09-12 | GRU 192×2, soft mask, **seq-loss** (proxy) | 0.5887 proxy / **0.6083 held-out 192** | vs 0.5753 / 0.6011 for the same run with the chunk loss; beats the baseline (0.6062) on identical rows with 20% of the data, 1 epoch |
+| 09-12 | seq-loss proxy variants (held-out 192): chunk 2000 / diff / no MSE / lr 7e-4 / dropout 0.2 | 0.5992 / 0.6151 / 0.5954 / 0.6158 / 0.6081 | diff and lr 7e-4 help slightly; keep chunk 1000 and the 0.1 MSE term |
+| 09-12 | **full train+valid, GRU 192×2, soft mask, seq-loss, epoch 1 of 3** | **0.6496** (EMA; raw 0.6481) | quarters 0.66/0.65/0.65/0.63; epochs 2–3 pending; packaged as `submissions/2026-09-12_seq_mix_e1` |
+| 09-12 | ↳ submitted as `0ATOIBJ1` | **public 0.6128** (#24) | offset −0.037; 38m36s runtime; prize line (#8) was 0.6272 |
+| 09-13 | seq-loss proxy, 2 epochs | 0.6288 held-out | +0.02 over 1 epoch (0.6083): epochs matter |
 
+**Drift finding.** On the held-out set gru192_e1 beats the baseline in every
+quarter of the sequence (0.64/0.64/0.62/0.60 vs 0.61/0.61/0.58/0.58) but
+loses on whole sequences: its prediction level drifts within a sequence.
+Per-chunk Pearson is blind to that; the metric's whole-sequence centring is
+not. `--seq-loss` (running-statistics sequence Pearson) fixes most of it: the
+per-target quarter WPs stay the same but the pooled score rises ~+0.01, and a
+2048-sequence proxy trained with it beats the baseline on identical rows.
+Annealing matters as much as data: both fully-annealed proxies beat the
+mid-schedule epoch-1 checkpoint of the full-data run. Always compare against
+the baseline on the *same* sequences and only judge full runs at the end of
+their LR schedule.
 The scored rows are a distinct regime: the reference model scores 0.58 on
 them and 0.30 on all required rows (or any random 11%). `is_scored` is
 partly predictable from the row itself (GBM AUC 0.83; `a3`, `a2`, `a4` carry

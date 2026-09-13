@@ -74,7 +74,11 @@ def evaluate(model: Predictor, features: np.ndarray, targets: np.ndarray, scored
             out, state = model(x[:, t:t + chunk], state)
             preds[i:i + batch, t:t + chunk] = out.float().cpu().numpy()
     model.train()
-    return score_batch(targets, preds, scored)
+    result = score_batch(targets, preds, scored)
+    q = SEQUENCE_LENGTH // 4
+    result["quarters"] = [round(score_batch(targets[:, i * q:(i + 1) * q], preds[:, i * q:(i + 1) * q],
+                                            scored[:, i * q:(i + 1) * q])["weighted_pearson"], 4) for i in range(4)]
+    return result
 
 
 def main() -> int:
@@ -238,7 +242,7 @@ def main() -> int:
         fit_raw = evaluate(model, fit.features, fit.targets, fit_scored, device)
         print(f"== epoch {epoch} done in {(time.time() - t_epoch) / 60:.1f} min: "
               f"val WP ema {scores['weighted_pearson']:.4f} (t0 {scores['t0']:.4f} t1 {scores['t1']:.4f}) "
-              f"raw {raw['weighted_pearson']:.4f} | train-subset WP (all rows) {fit_raw['weighted_pearson']:.4f}", flush=True)
+              f"raw {raw['weighted_pearson']:.4f} quarters {scores['quarters']} | train-subset WP (all rows) {fit_raw['weighted_pearson']:.4f}", flush=True)
         log(epoch=epoch, step=step, val_ema=scores, val_raw=raw, fit_raw=fit_raw)
 
         use_ema = scores["weighted_pearson"] >= raw["weighted_pearson"]

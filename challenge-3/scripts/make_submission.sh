@@ -6,9 +6,10 @@
 # sequences, the 1-CPU Docker timing, and zips submission.zip.
 #
 # --unroll MODE rewrites the fused GRU/LSTM ops as explicit MatMul cells and
-# quantises them (MODE = nbits8 | dynamic | nbits4, see src/unroll.py). Use
-# nbits8 for anything that ships: the fused kernels are ~2x slower on the
-# scorer's x86 vCPU than on Apple silicon, and this is what buys it back.
+# quantises them (MODE = dynamic | nbits8 | nbits4, see src/unroll.py). Use
+# dynamic for anything that ships: the fused kernels are ~2x slower on the
+# scorer's x86 vCPU than on Apple silicon, dynamic int8 buys ~0.6x of that back
+# on every x86 host measured, and nbits8 is only faster where the CPU has AMX.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CKPT=$1; NAME=$2; shift 2
@@ -25,8 +26,12 @@ done
 
 echo "== export"
 rm -f src/*.onnx
-python3 src/export.py "$CKPT" "src/$NAME.onnx" $INT8 2>&1 | grep -v -i -E "warning|torch.onnx|_generic_rnn"
-if [ -n "$INT8" ]; then rm -f "src/$NAME.onnx"; fi     # keep only the int8 graph
+if [ -z "$INT8" ] && python3 src/export_slim.py "$CKPT" "src/$NAME.onnx" 2>&1 | grep -v -i warning; then
+  echo "(hand-built slim graph)"
+else
+  python3 src/export.py "$CKPT" "src/$NAME.onnx" $INT8 2>&1 | grep -v -i -E "warning|torch.onnx|_generic_rnn"
+  if [ -n "$INT8" ]; then rm -f "src/$NAME.onnx"; fi     # keep only the int8 graph
+fi
 if [ -n "$UNROLL" ]; then
   echo "== unroll + $UNROLL quantisation"
   python3 src/unroll.py "src/$NAME.onnx" "src/${NAME}_$UNROLL.onnx" --quant "$UNROLL" --check --rows 5000 2>&1 | grep -v -i warning

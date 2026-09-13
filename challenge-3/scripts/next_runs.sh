@@ -1,57 +1,62 @@
 #!/bin/bash
-# Run queue for the Mac, in priority order, sized by the x86 timing matrix in
-# README.md (GRU 256x2 8-bit ~65 us/row end to end is the largest single model
-# that fits; two 192x2 models fit as an ensemble).
+# Run queue for the Mac, in priority order. Public-leaderboard context (09-13):
+# #1 is 0.671, the prize line (#8) ~0.627; our seq_mix_e1 is 0.6128 public from
+# 0.6496 held-out, so held-out -> public is about -0.037. Public 0.69 means
+# held-out ~0.725.
 #
-#   scripts/next_runs.sh            # runs everything below in sequence
-#   scripts/next_runs.sh r1         # just one run
+# Sizing (README "Sizing for the platform"): unrolled + dynamic-int8 graphs
+# project to ~52 us/row for GRU 192x2, ~56 for 256x2, ~67 for 320x2 on the
+# platform (budget 96); a 2-model 192x2 ensemble is ~92 and too tight. Always
+# package with --unroll dynamic and confirm the Docker timing before uploading.
 #
-# Each run ends with a packaged, timed, contract-tested submission zip in
-# submission.zip; move it to submissions/<date>_<name>/ with a NOTES.md.
+#   scripts/next_runs.sh            # everything in sequence
+#   scripts/next_runs.sh r2         # one stage
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ONLY=${1:-all}
 run() { [ "$ONLY" = all ] || [ "$ONLY" = "$1" ]; }
 
 MASK="runs/mask/train_scored_p.f16"     # written by: python src/maskmodel.py label --tag mask
-COMMON="--loss-mask soft --soft-mask $MASK --lr 5e-4 --batch 64 --chunk 1000 --holdout 192 --ema 0.999"
+# the seq_mix_e1 recipe (held-out 0.6496 mid-schedule): seq-loss, soft mask,
+# train + non-held-out valid, chunk 1000, 0.1 MSE term. lr 7e-4 and --diff were
+# each worth ~+0.007 on the proxy.
+COMMON="--seq-loss --loss-mask soft --soft-mask $MASK --add-valid --holdout 192 --lr 7e-4 --batch 64 --chunk 1000 --ema 0.999"
 
-# r1: the same recipe that gave 0.5955 after one epoch, run to completion.
-# Epoch 2 was never validated; the dev proxy says 3-4 epochs is where it
-# flattens. This is the cheapest expected gain.
+# r1: let the running full seq-mix run finish its schedule (epochs 2-3) and
+# package the final checkpoint; the 2-epoch proxy gained +0.02 over 1 epoch.
 if run r1; then
-  python3 src/train.py --tag gru192_full --rnn gru --hidden 192 --proj 64 --epochs 4 $COMMON
-  scripts/make_submission.sh runs/gru192_full/best.pt gru192_full --unroll nbits8
+  scripts/make_submission.sh runs/full_seq_mix/best.pt seq_mix_e3 --unroll dynamic
 fi
 
-# r2: the largest single model that fits on x86. On the dev proxy 256x2 beat
-# 192x2 by ~0.02-0.04 at equal LR.
+# r2: capacity. GRU 256x2 was +0.02-0.04 over 192x2 on the proxy and now fits
+# the budget as an unrolled dynamic-int8 graph (it did not as fused fp32).
+# 320x2 (~67 us projected) is the next step if 256x2 lands with margin.
 if run r2; then
-  python3 src/train.py --tag gru256_full --rnn gru --hidden 256 --proj 64 --epochs 4 $COMMON
-  scripts/make_submission.sh runs/gru256_full/best.pt gru256_full --unroll nbits8
+  python3 src/train.py --tag seq_gru256 --rnn gru --hidden 256 --proj 64 --epochs 4 --diff $COMMON
+  scripts/make_submission.sh runs/seq_gru256/best.pt seq_gru256 --unroll dynamic
 fi
 
-# r3: second seed of r1 for a 2-model ensemble (2 x 192x2 8-bit ~ 85 us/row
-# end to end on x86 -- check the Docker timing before shipping). Ensembling
-# two independently seeded runs is usually worth +0.005-0.01 WP here.
+# r3: a second seed of the best 192x2 recipe for a 2-model ensemble. Projected
+# ~92 us/row on the platform: only upload if the Docker replica shows < 45 us
+# (the replica is ~2x faster than the platform).
 if run r3; then
-  python3 src/train.py --tag gru192_s1 --rnn gru --hidden 192 --proj 64 --epochs 4 --seed 1 $COMMON
-  # package both graphs into one zip: export each, unroll each, put both .onnx in src/
+  python3 src/train.py --tag seq_gru192_s1 --rnn gru --hidden 192 --proj 64 --epochs 4 --diff --seed 1 $COMMON
   rm -f src/*.onnx
-  python3 src/export.py runs/gru192_full/best.pt src/a.onnx
-  python3 src/export.py runs/gru192_s1/best.pt src/b.onnx
-  python3 src/unroll.py src/a.onnx src/a_nbits8.onnx --quant nbits8
-  python3 src/unroll.py src/b.onnx src/b_nbits8.onnx --quant nbits8
+  python3 src/export_slim.py runs/full_seq_mix/best.pt src/a.onnx
+  python3 src/export_slim.py runs/seq_gru192_s1/best.pt src/b.onnx
+  python3 src/unroll.py src/a.onnx src/a_nbits8.onnx --quant dynamic
+  python3 src/unroll.py src/b.onnx src/b_nbits8.onnx --quant dynamic
   rm -f src/a.onnx src/b.onnx src/*.fp32.onnx
+  (cd src && python3 -m pytest test_contract.py -q | tail -1)
   python3 src/score.py --strict --seqs 20
   mise run docker-test
   mise run submit
 fi
 
-# r4: train + validation in one stream for the final candidate (no held-out
-# check possible, so only after r1/r2 have fixed the epoch count).
+# r4: longer schedule on the winner of r1/r2 (8 epochs, lr 5e-4): the proxies
+# say annealing and epochs matter as much as data.
 if run r4; then
-  python3 src/train.py --tag gru256_trainvalid --rnn gru --hidden 256 --proj 64 --epochs 4 --add-valid \
-    --loss-mask soft --soft-mask $MASK --lr 5e-4 --batch 64 --chunk 1000 --ema 0.999
-  scripts/make_submission.sh runs/gru256_trainvalid/best.pt gru256_trainvalid --unroll nbits8 --strict-seqs 5
+  python3 src/train.py --tag seq_gru256_long --rnn gru --hidden 256 --proj 64 --epochs 8 --diff \
+    --seq-loss --loss-mask soft --soft-mask $MASK --add-valid --holdout 192 --lr 5e-4 --batch 64 --chunk 1000 --ema 0.999
+  scripts/make_submission.sh runs/seq_gru256_long/best.pt seq_gru256_long --unroll dynamic
 fi
