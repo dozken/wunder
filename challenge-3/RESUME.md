@@ -1,0 +1,28 @@
+# Resume notes (paused 2026-09-13 ~19:10)
+
+State when paused: `full_seq_5ep` (epoch 5/5) and `teacher384` (epoch 3/3) were
+finishing on their own (~20:00). Their results land in `runs/full_seq_5ep.out`
+and `runs/teacher384.out` (`grep "^=="`). Best held-out so far: 0.6659 (5-epoch
+run, epoch 3). Upload gate: projected public top-5 → held-out ≥ ~0.681
+(#5 was 0.6431; local→public offset ≈ −0.038).
+
+Next steps, in priority order (each ~4–7 h on the Mac; run one at a time with
+`caffeinate -s -i` and the lid open):
+
+1. Combined recipe, 5 epochs + SWA:
+   python3 src/train.py --tag full_v3 --rnn gru --hidden 192 --layers 2 --proj 128 --lr 1e-3 --diff \
+     --batch 64 --chunk 1000 --epochs 5 --val-seqs 192 --log-every 100 \
+     --loss-mask soft --soft-mask runs/mask2/train_scored_p.f16 --add-valid --seq-loss --swa > runs/full_v3.out 2>&1
+
+2. Distillation from the GRU-384 teacher (needs runs/teacher384/best.pt):
+   python3 src/teacher_label.py runs/teacher384/best.pt runs/teacher384
+   python3 src/train.py --tag student_distill --rnn gru --hidden 192 --layers 2 --proj 128 --lr 1e-3 --diff \
+     --batch 64 --chunk 1000 --epochs 5 --val-seqs 192 --log-every 100 \
+     --loss-mask soft --soft-mask runs/mask2/train_scored_p.f16 --add-valid --seq-loss --swa \
+     --distill 0.5 --teacher-train runs/teacher384/teacher_train.f16 --teacher-valid runs/teacher384/teacher_valid.f16 \
+     > runs/student_distill.out 2>&1
+
+3. For any candidate: `python3 src/diagnose.py runs/<tag>/best.pt` (held-out vs baseline on identical rows),
+   then `scripts/make_submission.sh runs/<tag>/best.pt <name>` and upload only if held-out ≥ 0.681.
+
+Submissions so far: 0.5617 → 0.6128 → 0.6221 → 0.6221 (public), rank #11–12.
