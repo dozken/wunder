@@ -173,6 +173,8 @@ mise run submit                                   # -> submission.zip
 | 09-12 | GRU 192×2, soft mask, **seq-loss** (proxy) | 0.5887 proxy / **0.6083 held-out 192** | vs 0.5753 / 0.6011 for the same run with the chunk loss; beats the baseline (0.6062) on identical rows with 20% of the data, 1 epoch |
 | 09-12 | seq-loss proxy variants (held-out 192): chunk 2000 / diff / no MSE / lr 7e-4 / dropout 0.2 | 0.5992 / 0.6151 / 0.5954 / 0.6158 / 0.6081 | diff and lr 7e-4 help slightly; keep chunk 1000 and the 0.1 MSE term |
 | 09-12 | **full train+valid, GRU 192×2, soft mask, seq-loss, epoch 1 of 3** | **0.6496** (EMA; raw 0.6481) | quarters 0.66/0.65/0.65/0.63; epochs 2–3 pending; packaged as `submissions/2026-09-12_seq_mix_e1` |
+| 09-12 | ↳ submitted as `0ATOIBJ1` | **public 0.6128** (#24) | offset −0.037; 38m36s runtime; prize line (#8) was 0.6272 |
+| 09-13 | seq-loss proxy, 2 epochs | 0.6288 held-out | +0.02 over 1 epoch (0.6083): epochs matter |
 
 **Drift finding.** On the held-out set gru192_e1 beats the baseline in every
 quarter of the sequence (0.64/0.64/0.62/0.60 vs 0.61/0.61/0.58/0.58) but

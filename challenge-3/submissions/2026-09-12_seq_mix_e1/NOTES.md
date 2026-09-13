@@ -19,3 +19,5 @@ Local numbers:
 - export parity torch vs onnxruntime: 7e-7; contract tests 5/5
 
 Submitted 2026-09-12 22:47 as `0ATOIBJ1` (submission 2/5 that day).
+
+Public score **0.6128** (#24 at the time), runtime 38m36s.
