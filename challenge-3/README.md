@@ -199,3 +199,20 @@ them and 0.30 on all required rows (or any random 11%). `is_scored` is
 partly predictable from the row itself (GBM AUC 0.83; `a3`, `a2`, `a4` carry
 most of it) and is sticky (P(scored | previous scored) = 0.77), so a
 sequence model should do better — see `src/maskmodel.py`.
+
+## Held-out error analysis (seq_diff_e3, 192 sequences)
+
+*   Per-sequence WP: median 0.715, mean 0.663, std 0.20, min −0.08. The mean is
+    dragged by a tail of hard sequences (36 of 192 score < 0.5).
+*   Difficulty is regime-driven: per-sequence score correlates −0.68 with the
+    sequence mean of `a5`, −0.58 with `a7` (a discrete, 86-valued feature), −0.64
+    with the zero-target fraction, +0.55 with the share of |t| > 2 rows. The
+    baseline suffers the same way; our gain over it is concentrated in the easy
+    sequences (bottom target-std quartile 0.549 vs 0.498, top 0.736 vs 0.681).
+*   t0 and t1 per-sequence scores are 0.84 correlated — no target-specific
+    failure.
+*   Scores fall with position for both models (rows ≥ 10 000: 0.655 vs 0.663
+    overall); target statistics near the end are normal, so it is not horizon
+    truncation. A wider teacher (GRU 384×2) is only +0.004 at epoch 1, so
+    capacity is not the limit either; remaining levers are optimisation length,
+    distillation, and the mask weighting.
