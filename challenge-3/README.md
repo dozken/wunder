@@ -218,3 +218,16 @@ sequence model should do better — see `src/maskmodel.py`.
     truncation. A wider teacher (GRU 384×2) is only +0.004 at epoch 1, so
     capacity is not the limit either; remaining levers are optimisation length,
     distillation, and the mask weighting.
+
+## Running on another machine
+
+```bash
+git clone git@github.com:dozken/wunder.git && cd wunder/challenge-3
+scripts/setup_remote.sh        # venv, deps, 33.7 GB starter pack (resumable), mask-v2 labels, sanity checks
+```
+
+The device is auto-detected (CUDA → MPS → CPU). On a CUDA GPU, `--batch 128`
+or more is fine and cuDNN makes epochs several times faster than on the Mac.
+`checkpoints/` ships the mask-v2 predictor and the submitted models so a new
+machine can relabel, diagnose, distil, or fine-tune without retraining from
+scratch; `RESUME.md` lists the next runs. Data and `runs/` never enter git.

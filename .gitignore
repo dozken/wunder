@@ -46,3 +46,6 @@ runs/
 # Packaged submissions are kept (small ONNX graphs)
 !challenge-3/submissions/**/*.onnx
 !challenge-3/submissions/**/*.zip
+
+# Shipped checkpoints (small) for continuing on another machine
+!challenge-3/checkpoints/*.pt
