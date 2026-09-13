@@ -5,7 +5,7 @@ Sep 11 → Nov 15 2026 (submissions close) → Dec 1 (winners) · $13,600 pool, 
 
 **Status (2026-09-13):** public **0.6221**, rank #11–12 of ~90 scoring entries.
 Provided baseline 0.5719 public; top 3 ≥ 0.651, #5 0.643, prize line (#8) 0.627.
-Local held-out best **0.6671** (`full_seq_5ep`, epoch 5; `checkpoints/seq_5ep.pt`), projected public ≈ 0.629 — below the top-5 upload gate. See `RESUME.md` for the next runs.
+Local held-out best **0.6671** (`full_seq_5ep`, epoch 5; `checkpoints/seq_5ep.pt`), uploaded 2026-09-13 20:12 as `00NKMQVT` (projected public ≈ 0.629); result to be read tomorrow. See `RESUME.md` for the next runs.
 
 ## Task
 
@@ -127,7 +127,7 @@ challenge-3/
 | + diff, lr 7e-4 (`seq_diff`) | 0.6495 / 0.6591 / **0.6626** | 0.6221 | `211TK6NX`; +0.002 did not transfer |
 | proxies on diff + mask v2: lr 7e-4 / lr 1e-3 / proj 128 | 0.623 / 0.627 / 0.628 | — | small positives |
 | proxies: mask v2 / 320×1 / 160×3 / 224×2 | 0.611 / 0.611 / 0.608 / 0.610 | — | noise |
-| seq-loss + diff, mask v2, 5 epochs (`full_seq_5ep`) | 0.6487 / 0.6597 / 0.6659 / 0.6654 / **0.6671** | — | first-quarter WP rises to 0.70 with training, last quarter stays 0.638 |
+| seq-loss + diff, mask v2, 5 epochs (`full_seq_5ep`) | 0.6487 / 0.6597 / 0.6659 / 0.6654 / **0.6671** | pending (`00NKMQVT`) | first-quarter WP rises to 0.70 with training, last quarter stays 0.638 |
 | teacher GRU 384×2 proj128, 3 epochs + SWA | 0.6546 / 0.6630 / 0.6645, SWA **0.6652** | — | `checkpoints/teacher384.pt`; only +0.003 over the 192; SWA +0.0007 |
 | mask model v1 → v2 | AUC 0.93 → 0.94, AP 0.66 → 0.69 | — | `checkpoints/mask2.pt` |
 

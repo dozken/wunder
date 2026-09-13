@@ -33,4 +33,4 @@ Next steps, in priority order (each ~4–7 h on the Mac; run one at a time with
 3. For any candidate: `python3 src/diagnose.py runs/<tag>/best.pt` (held-out vs baseline on identical rows),
    then `scripts/make_submission.sh runs/<tag>/best.pt <name>` and upload only if held-out ≥ 0.681.
 
-Submissions so far: 0.5617 → 0.6128 → 0.6221 → 0.6221 (public), rank #11–12.
+Submissions so far: 0.5617 → 0.6128 → 0.6221 → 0.6221 → `00NKMQVT` pending (seq_5ep, held-out 0.6671; check https://wundernn.io/connectome/submit). Rank #11–12 before it.
