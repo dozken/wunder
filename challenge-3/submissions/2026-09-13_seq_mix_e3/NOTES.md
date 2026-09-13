@@ -16,3 +16,5 @@ Local numbers:
 - export parity 7e-7; contract tests 5/5; same graph size as e1 (38m36s on the platform)
 
 Submitted 2026-09-13 07:15 as `052UVJK5` (submission 1/5 that day).
+
+Public score **0.6221** (#11 at the time), runtime 38m19s.

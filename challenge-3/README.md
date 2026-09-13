@@ -176,6 +176,8 @@ mise run submit                                   # -> submission.zip
 | 09-12 | ↳ submitted as `0ATOIBJ1` | **public 0.6128** (#24) | offset −0.037; 38m36s runtime; prize line (#8) was 0.6272 |
 | 09-13 | seq-loss proxy, 2 epochs | 0.6288 held-out | +0.02 over 1 epoch (0.6083): epochs matter |
 | 09-13 | **full train+valid, seq-loss, epochs 2 / 3** | 0.6585 / **0.6603** (raw; EMA 0.6600) | quarters 0.67/0.67/0.66/0.64; packaged as `submissions/2026-09-13_seq_mix_e3` |
+| 09-13 | ↳ submitted as `052UVJK5` | **public 0.6221** (#11) | offset −0.038; 38m19s; prize line (#8) 0.6272 |
+| 09-13 | seq-loss proxy + aux is_scored head (0.3) | 0.6102 held-out | vs 0.6083 without: noise, dropped |
 
 **Drift finding.** On the held-out set gru192_e1 beats the baseline in every
 quarter of the sequence (0.64/0.64/0.62/0.60 vs 0.61/0.61/0.58/0.58) but
