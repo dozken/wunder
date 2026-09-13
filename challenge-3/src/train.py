@@ -98,6 +98,12 @@ def main() -> int:
     ap.add_argument("--warmup", type=float, default=0.05, help="fraction of steps")
     ap.add_argument("--clip", type=float, default=1.0)
     ap.add_argument("--pearson-weight", type=float, default=0.9)
+    ap.add_argument("--teacher-train", default=None, help="teacher_label.py memmap for train.parquet")
+    ap.add_argument("--teacher-valid", default=None, help="teacher_label.py memmap for valid.parquet")
+    ap.add_argument("--distill", type=float, default=0.0,
+                    help="weight of MSE(student, teacher) on required rows, added to the loss")
+    ap.add_argument("--swa", action="store_true",
+                    help="average raw weights over the last epoch and keep it if it scores best")
     ap.add_argument("--aux-mask", type=float, default=0.0,
                     help="weight of an auxiliary BCE head predicting is_scored (third output channel, dropped at export)")
     ap.add_argument("--seq-loss", action="store_true",
@@ -134,8 +140,11 @@ def main() -> int:
         with open(log_path, "a") as f:
             f.write(json.dumps(kv) + "\n")
 
-    train_reader = SequenceReader(args.train_path, soft_mask=args.soft_mask if args.loss_mask == "soft" else None)
-    valid_reader = SequenceReader(VALID_PATH)
+    train_reader = SequenceReader(args.train_path, soft_mask=args.soft_mask if args.loss_mask == "soft" else None,
+                                  teacher=args.teacher_train if args.distill > 0 else None)
+    valid_reader = SequenceReader(VALID_PATH, teacher=args.teacher_valid if args.distill > 0 else None)
+    if args.distill > 0 and (args.teacher_train is None or (args.add_valid and args.teacher_valid is None)):
+        ap.error("--distill needs --teacher-train (and --teacher-valid with --add-valid)")
     rng = np.random.default_rng(args.seed)
     if args.holdout:
         # training on the masked validation file: split it into train / held-out
@@ -195,6 +204,7 @@ def main() -> int:
 
     criterion = CombinedLoss(args.pearson_weight)
     seq_pearson, mse = SequencePearsonLoss(), WeightedMSELoss()
+    swa_sum, swa_n = None, 0
     step_mask = torch.from_numpy(STEP_MASK).to(device)
     best = -1.0
     step = 0
@@ -209,6 +219,7 @@ def main() -> int:
             y_all = torch.from_numpy(batch.targets).to(device, non_blocking=True)
             m_all = (torch.from_numpy(batch.scored).to(device) if args.loss_mask != "all"
                      else step_mask.expand(x_all.shape[0], -1))
+            t_all = torch.from_numpy(batch.teacher).to(device) if args.distill > 0 else None
             state = model.initial_state(x_all.shape[0], device)
             seq_pearson.reset()
             for t in range(0, SEQUENCE_LENGTH, args.chunk):
@@ -224,6 +235,9 @@ def main() -> int:
                             + (1 - args.pearson_weight) * mse(pred, y, m))
                 else:
                     loss = criterion(pred, y, m)
+                if args.distill > 0:
+                    req = step_mask[t:t + args.chunk].to(out.dtype).expand(x.shape[0], -1).unsqueeze(-1)
+                    loss = loss + args.distill * ((pred - t_all[:, t:t + args.chunk]) ** 2 * req).sum() / (req.sum() * 2)
                 if args.aux_mask > 0:
                     # target: real mask on valid rows, predicted probability on train rows;
                     # only required (post warm-up) rows count
@@ -237,6 +251,11 @@ def main() -> int:
                 ema.update(model)
                 state = state.detach()
                 step += 1
+                if args.swa and epoch == args.epochs and step % 25 == 0:
+                    with torch.no_grad():
+                        cur = [p.detach().float().clone() for p in model.parameters()]
+                        swa_sum = cur if swa_sum is None else [a + b for a, b in zip(swa_sum, cur)]
+                        swa_n += 1
                 run_loss += loss.item()
                 run_n += 1
                 if step % args.log_every == 0:
@@ -257,6 +276,16 @@ def main() -> int:
         use_ema = scores["weighted_pearson"] >= raw["weighted_pearson"]
         current = max(scores["weighted_pearson"], raw["weighted_pearson"])
         source = ema.shadow if use_ema else model
+        if args.swa and epoch == args.epochs and swa_n > 0:
+            swa_model = copy.deepcopy(model)
+            with torch.no_grad():
+                for p, a in zip(swa_model.parameters(), swa_sum):
+                    p.copy_((a / swa_n).to(p.dtype))
+            swa_scores = evaluate(swa_model, val.features, val.targets, val.scored, device)
+            print(f"   SWA over {swa_n} snapshots: val WP {swa_scores['weighted_pearson']:.4f} quarters {swa_scores['quarters']}", flush=True)
+            log(epoch=epoch, step=step, val_swa=swa_scores)
+            if swa_scores["weighted_pearson"] > current:
+                current, source, use_ema = swa_scores["weighted_pearson"], swa_model, False
         ckpt = {"config": cfg.to_dict(), "mean": mean, "std": std,
                 "state_dict": {k: v.detach().cpu() for k, v in source.state_dict().items()},
                 "val_wp": current, "epoch": epoch, "ema": use_ema, "args": vars(args)}

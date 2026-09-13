@@ -181,6 +181,7 @@ mise run submit                                   # -> submission.zip
 | 09-13 | full train+valid, seq-loss + **diff inputs, lr 7e-4**, 3 epochs | 0.6495 / 0.6591 / **0.6626** (raw) | +0.002 over the reference recipe; quarters 0.67/0.67/0.66/0.64 |
 | 09-13 | mask model v2 (GRU 192, 4 epochs) | held-out AUC 0.9416 / AP 0.6925 | v1: 0.9315 / 0.6589; train relabelled to `runs/mask2/` |
 | 09-13 | ↳ diff run submitted as `211TK6NX` | **public 0.6221** (= #3's score) | +0.002 held-out did not transfer; policy now: upload only if projected top-5 |
+| 09-13 | seq-loss proxies: mask v2 / GRU 320×1 / 160×3 / 224×2 | 0.6106 / 0.6108 / 0.6083 / 0.6102 | all within ±0.005 of the 0.6083 reference — 1-epoch proxies can't resolve differences this small any more |
 
 **Drift finding.** On the held-out set gru192_e1 beats the baseline in every
 quarter of the sequence (0.64/0.64/0.62/0.60 vs 0.61/0.61/0.58/0.58) but

@@ -36,12 +36,14 @@ class Sequence:
     features: np.ndarray        # (20000, 112) float32
     targets: np.ndarray         # (20000, 2) float32
     scored: np.ndarray | None   # (20000,) bool, only in valid
+    teacher: np.ndarray | None = None   # (20000, 2) float32 teacher predictions, for distillation
 
 
 class SequenceReader:
     """Random access to the sequences of one parquet file."""
 
-    def __init__(self, path: Path | str, soft_mask: Path | str | None = None):
+    def __init__(self, path: Path | str, soft_mask: Path | str | None = None,
+                 teacher: Path | str | None = None):
         self.path = Path(path)
         self.parquet = pq.ParquetFile(self.path)
         names = self.parquet.schema_arrow.names
@@ -53,6 +55,11 @@ class SequenceReader:
             self.soft_mask = np.memmap(soft_mask, dtype=np.float16, mode="r",
                                        shape=(self.parquet.num_row_groups, SEQUENCE_LENGTH))
             self.has_mask = True
+        # teacher predictions from teacher_label.py: float16 memmap (row_groups, 20000, 2)
+        self.teacher = None
+        if teacher is not None:
+            self.teacher = np.memmap(teacher, dtype=np.float16, mode="r",
+                                     shape=(self.parquet.num_row_groups, SEQUENCE_LENGTH, 2))
         self.columns = ["seq_ix", *FEATURE_COLUMNS, *TARGET_COLUMNS]
         if "is_scored" in names:
             self.columns.append("is_scored")
@@ -76,7 +83,8 @@ class SequenceReader:
         elif "is_scored" in self.columns:
             scored = table.column("is_scored").to_numpy(zero_copy_only=False).astype(bool) & STEP_MASK
         seq_ix = int(table.column("seq_ix")[0].as_py())
-        return Sequence(seq_ix, features, targets, scored)
+        teacher = None if self.teacher is None else np.asarray(self.teacher[index], dtype=np.float32)
+        return Sequence(seq_ix, features, targets, scored, teacher)
 
     def read_many(self, indices, workers: int = 8) -> list[Sequence]:
         with ThreadPoolExecutor(workers) as pool:
@@ -88,6 +96,7 @@ class Batch:
     features: np.ndarray        # (B, 20000, 112)
     targets: np.ndarray         # (B, 20000, 2)
     scored: np.ndarray | None   # (B, 20000) bool
+    teacher: np.ndarray | None = None   # (B, 20000, 2)
 
 
 def collate(sequences: list[Sequence]) -> Batch:
@@ -97,7 +106,10 @@ def collate(sequences: list[Sequence]) -> Batch:
     if all(s.scored is not None for s in sequences):
         # real masks are bool, predicted ones float; a mixed batch becomes float
         scored = np.stack([s.scored.astype(np.float32) for s in sequences])
-    return Batch(features, targets, scored)
+    teacher = None
+    if all(s.teacher is not None for s in sequences):
+        teacher = np.stack([s.teacher for s in sequences])
+    return Batch(features, targets, scored, teacher)
 
 
 class BatchStream:
