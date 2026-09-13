@@ -7,6 +7,13 @@ and `runs/teacher384.out` (`grep "^=="`). Best held-out so far: **0.6671** (`ful
 with more epochs, an open lead). Upload gate: projected public top-5 → held-out ≥ ~0.681
 (#5 was 0.6431; local→public offset ≈ −0.038).
 
+Teacher result: 0.6645 raw / 0.6652 SWA (3 epochs) — barely above the 192, so
+distillation (step 2) is a small bet; the open lead is the late-sequence gap
+(quarters 0.70 → 0.64 on every model). Ideas not yet tried: state re-centering /
+running feature normalisation as explicit inputs, longer effective context
+(chunk 2000–4000 now that the loss is sequence-level and the LR is settled),
+per-sequence adaptive loss weighting for the hard regimes (`a5`, `a7`).
+
 Next steps, in priority order (each ~4–7 h on the Mac; run one at a time with
 `caffeinate -s -i` and the lid open):
 

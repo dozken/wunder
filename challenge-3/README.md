@@ -50,8 +50,8 @@ LSTM (worse than GRU at equal cost, even though int8 quantisation would make it
 cheaper); chunk-level Pearson; longer chunks; dropping the MSE term; an
 auxiliary `is_scored` head; width/depth swaps at equal parameters; peak LR ≥ 1e-3
 under the chunk loss; graph micro-optimisation (the batch-1 GRU weight reads are
-the floor, not glue ops). A GRU 384×2 teacher is only +0.004 at epoch 1: capacity
-is not the bottleneck.
+the floor, not glue ops). A GRU 384×2 teacher ends only +0.003 above the 192 (0.6652 vs 0.6626 at 3
+epochs) and SWA adds +0.0007: neither capacity nor weight averaging is the lever.
 
 ## Inference budget
 
@@ -128,7 +128,7 @@ challenge-3/
 | proxies on diff + mask v2: lr 7e-4 / lr 1e-3 / proj 128 | 0.623 / 0.627 / 0.628 | — | small positives |
 | proxies: mask v2 / 320×1 / 160×3 / 224×2 | 0.611 / 0.611 / 0.608 / 0.610 | — | noise |
 | seq-loss + diff, mask v2, 5 epochs (`full_seq_5ep`) | 0.6487 / 0.6597 / 0.6659 / 0.6654 / **0.6671** | — | first-quarter WP rises to 0.70 with training, last quarter stays 0.638 |
-| teacher GRU 384×2 proj128 | 0.6546 / 0.6630 / … | — | for distillation |
+| teacher GRU 384×2 proj128, 3 epochs + SWA | 0.6546 / 0.6630 / 0.6645, SWA **0.6652** | — | `checkpoints/teacher384.pt`; only +0.003 over the 192; SWA +0.0007 |
 | mask model v1 → v2 | AUC 0.93 → 0.94, AP 0.66 → 0.69 | — | `checkpoints/mask2.pt` |
 
 ## Running on another machine
