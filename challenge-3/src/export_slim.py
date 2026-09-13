@@ -44,8 +44,8 @@ def gru_weights(rnn: torch.nn.GRU, layer: int):
 
 def build(model) -> onnx.ModelProto:
     cfg = model.cfg
-    if cfg.rnn != "gru" or cfg.diff or cfg.proj <= 0:
-        raise ValueError("slim export covers GRU with an input projection and no diff features")
+    if cfg.rnn != "gru" or cfg.proj <= 0:
+        raise ValueError("slim export covers GRU with an input projection")
     H, P, L = cfg.hidden, cfg.proj, cfg.layers
     inits, nodes = [], []
 
@@ -65,11 +65,19 @@ def build(model) -> onnx.ModelProto:
     nodes.append(helper.make_node("Mul", ["features", "inv_std"], ["x_scaled"]))
     nodes.append(helper.make_node("Add", ["x_scaled", "neg_mean_scaled"], ["x_shift"]))
     nodes.append(helper.make_node("Clip", ["x_shift", "clip_lo", "clip_hi"], ["x"]))
+    gemm_in = "x"
+    if cfg.diff:
+        # previous standardised row rides in `prev`; the first row of a sequence
+        # sees prev = 0 exactly like the torch model's zero-initialised carry
+        nodes.append(helper.make_node("Sub", ["x", "prev"], ["dx"]))
+        nodes.append(helper.make_node("Concat", ["x", "dx"], ["x_cat"], axis=1))
+        nodes.append(helper.make_node("Identity", ["x"], ["next_prev"]))
+        gemm_in = "x_cat"
 
     lin, ln = model.inproj[0], model.inproj[2]
     const("W_in", lin.weight.detach().numpy())                       # (P, 112)
     const("b_in", lin.bias.detach().numpy().reshape(1, P))
-    nodes.append(helper.make_node("Gemm", ["x", "W_in", "b_in"], ["z_pre"], transB=1))
+    nodes.append(helper.make_node("Gemm", [gemm_in, "W_in", "b_in"], ["z_pre"], transB=1))
     nodes.append(helper.make_node("Gelu", ["z_pre"], ["z_act"], domain="com.microsoft"))
     const("ln_in_w", ln.weight.detach().numpy()); const("ln_in_b", ln.bias.detach().numpy())
     nodes.append(helper.make_node("LayerNormalization", ["z_act", "ln_in_w", "ln_in_b"], ["z"],
@@ -107,6 +115,9 @@ def build(model) -> onnx.ModelProto:
     inputs += [helper.make_tensor_value_info(n, TensorProto.FLOAT, [1, 1, H]) for n in state_in]
     outputs = [helper.make_tensor_value_info("prediction", TensorProto.FLOAT, [1, 2])]
     outputs += [helper.make_tensor_value_info(n, TensorProto.FLOAT, [1, 1, H]) for n in state_out]
+    if cfg.diff:
+        inputs.append(helper.make_tensor_value_info("prev", TensorProto.FLOAT, [1, 112]))
+        outputs.append(helper.make_tensor_value_info("next_prev", TensorProto.FLOAT, [1, 112]))
     graph = helper.make_graph(nodes, "predictor_slim", inputs, outputs, initializer=inits)
     m = helper.make_model(graph, opset_imports=[helper.make_opsetid("", OPSET), helper.make_opsetid("com.microsoft", 1)])
     m.ir_version = 9
@@ -122,14 +133,14 @@ def verify(model, path: Path, rows: int = 3000, seed: int = 0) -> float:
     ref, _ = model(torch.from_numpy(x).unsqueeze(0), model.initial_state(1))
     ref = ref.numpy()[0][:, :2]
     s = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
-    names = [i.name for i in s.get_inputs()]
-    states = {n: np.zeros((1, 1, model.cfg.hidden), np.float32) for n in names if n != "features"}
+    state_inputs = [i for i in s.get_inputs() if i.name != "features"]
+    states = {i.name: np.zeros(i.shape, np.float32) for i in state_inputs}
     out = np.zeros((rows, 2), np.float32)
     for t in range(rows):
         res = s.run(None, {"features": x[t:t + 1], **states})
         out[t] = res[0][0]
-        for k, n in enumerate(sorted(states)):
-            states[n] = res[1 + k]
+        for k, i in enumerate(state_inputs):          # outputs follow input order after `prediction`
+            states[i.name] = res[1 + k]
     return float(np.abs(out - ref).max())
 
 
